@@ -1,5 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/wechat", "destination": "/api/index" }
-  ]
-}
