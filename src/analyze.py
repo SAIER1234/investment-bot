@@ -92,7 +92,12 @@ def build_report_prompt(data: dict[str, Any]) -> str:
         elif code in otc_data:
             o = otc_data[code]
             if o:
-                prompt_parts.append(f"- 最新净值: {o.get('nav')}  (日期: {o.get('date')})")
+                nav_date = str(o.get("date", ""))
+                today_str = data.get("timestamp", "")[:10]
+                stale_warning = ""
+                if nav_date and nav_date != today_str:
+                    stale_warning = f" ⚠️ 非今日数据！最新可用净值为 {nav_date} 公布"
+                prompt_parts.append(f"- 最新净值: {o.get('nav')}  (日期: {nav_date}){stale_warning}")
                 prompt_parts.append(f"- 日增长率: {o.get('daily_change', 0):+.2f}%" if o.get('daily_change') is not None else "- 日增长率: N/A")
             else:
                 prompt_parts.append("- 今日净值尚未公布或抓取失败")
