@@ -1,0 +1,64 @@
+{
+  "owner": "学生投资者",
+  "risk_profile": "激进",
+  "total_capital": 50800,
+  "holdings": [
+    {
+      "code": "159516",
+      "name": "半导体设备ETF国泰",
+      "type": "ETF",
+      "amount": 20000,
+      "cost_nav": null,
+      "planned": true,
+      "note": "计划买入，尚未建仓"
+    },
+    {
+      "code": "003579",
+      "name": "沪深300",
+      "type": "场外基金",
+      "amount": 9500,
+      "cost_nav": null,
+      "planned": false,
+      "note": "已持有"
+    },
+    {
+      "code": "011613",
+      "name": "科创50",
+      "type": "场外基金",
+      "amount": 1400,
+      "cost_nav": null,
+      "planned": false,
+      "note": "已持有，仓位较轻"
+    },
+    {
+      "code": "025766",
+      "name": "港股通互联网",
+      "type": "场外基金",
+      "amount": 12600,
+      "cost_nav": null,
+      "planned": false,
+      "note": "已持有"
+    },
+    {
+      "code": "018927",
+      "name": "电池",
+      "type": "场外基金",
+      "amount": 7300,
+      "cost_nav": null,
+      "planned": false,
+      "note": "已持有"
+    }
+  ],
+  "watchlist": [
+    {
+      "code": "561980",
+      "name": "半导体设备ETF招商",
+      "reason": "同板块对照标的，费率更低"
+    },
+    {
+      "code": "589100",
+      "name": "科创芯片ETF国泰",
+      "reason": "半导体上游芯片设计，与设备形成互补"
+    }
+  ]
+}

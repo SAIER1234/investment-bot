@@ -1,0 +1,36 @@
+name: 每日投资报告
+
+on:
+  schedule:
+    # 北京时间 17:30 (UTC+8) = UTC 09:30
+    # 周一到周五运行
+    - cron: "30 9 * * 1-5"
+  workflow_dispatch:  # 允许手动触发测试
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install -r investment-bot/requirements.txt
+
+      - name: 运行投资报告
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC_INVEST: ${{ secrets.PUSHPLUS_TOPIC_INVEST || 'investment' }}
+        run: |
+          cd investment-bot
+          python -m src.main
