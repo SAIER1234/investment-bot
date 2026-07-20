@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: wechat-invest-bot
+    runtime: python
+    buildCommand: pip install -r wechat_server/requirements.txt
+    startCommand: cd wechat_server && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 30
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: WECHAT_TOKEN
+        sync: false
