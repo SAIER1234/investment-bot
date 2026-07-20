@@ -1,151 +1,111 @@
 """
-基金数据抓取模块
-使用 akshare / 东方财富开放API 获取基金净值、ETF行情、板块数据
+基金数据抓取模块（场外基金only）
+使用 akshare 获取基金净值、指数估值、市场情绪、技术指标。
 """
 
-import json
 import logging
 import os
 from datetime import datetime, timedelta
 from typing import Any
 
-# ── 禁用代理（Windows系统代理 + 环境变量） ───────────────
-# akshare 底层走 requests → urllib → Windows 注册表代理。
-# 东方财富等国内数据源直连更快，经过代理（如 Clash 7897）反而超时。
-for _key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
-             "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"):
-    os.environ.pop(_key, None)
-os.environ["no_proxy"] = "*"
+from src.common import (
+    ROOT_DIR, CONFIG_DIR, DATA_DIR,
+    disable_proxy, ensure_data_dir, load_json, save_json,
+)
 
-# 阻止 urllib 读取 Windows 系统代理设置（注册表）
-try:
-    import urllib.request
-    urllib.request.getproxies = lambda: {}
-except Exception:
-    pass
+disable_proxy()
 
 import akshare as ak
 import pandas as pd
+import requests
 
 logger = logging.getLogger(__name__)
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-CONFIG_DIR = os.path.join(ROOT_DIR, "config")
-
-
-def ensure_data_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-
 
 def load_portfolio() -> dict[str, Any]:
-    """加载持仓配置文件"""
-    path = os.path.join(CONFIG_DIR, "portfolio.json")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return load_json(os.path.join(CONFIG_DIR, "portfolio.json"))
 
 
-# ── ETF 行情 ────────────────────────────────────────────
-
-def fetch_etf_spot(codes: list[str]) -> dict[str, dict[str, Any]]:
-    """
-    获取 ETF 实时行情（收盘后为当日收盘数据）。
-    返回 { code: { name, price, change_pct, volume, amount, discount_pct } }
-    """
-    try:
-        df: pd.DataFrame = ak.fund_etf_spot_em()
-        df = df[df["代码"].isin(codes)]
-        result: dict[str, dict[str, Any]] = {}
-        for _, row in df.iterrows():
-            code = str(row["代码"])
-            result[code] = {
-                "name": str(row.get("名称", "")),
-                "price": _safe_float(row.get("最新价")),
-                "change_pct": _safe_float(row.get("涨跌幅")),
-                "volume": _safe_float(row.get("成交量")),
-                "amount": _safe_float(row.get("成交额")),
-                "discount_pct": _safe_float(row.get("折价率", 0)),
-                "nav": _safe_float(row.get("IOPV", row.get("单位净值"))),
-            }
-        return result
-    except Exception as e:
-        logger.error(f"ETF 行情抓取失败: {e}")
-        return {}
-
-
-def fetch_etf_hist(symbol: str, days: int | None = None) -> pd.DataFrame:
-    """
-    获取 ETF 历史净值（单位净值，已复权），用于计算近期涨跌幅。
-    使用 fund_open_fund_info_em 获取拆分调整后的净值，避免拆分导致的计算偏差。
-    days=None 表示获取全部可用历史数据。
-    返回 DataFrame，包含 净值日期 / 单位净值 / 日增长率 等列。
-    """
-    try:
-        df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值走势")
-        if df is not None and not df.empty:
-            df = df.sort_values("净值日期")
-            if days is not None:
-                cutoff = datetime.now().date() - timedelta(days=days + 5)
-                df = df[df["净值日期"] >= cutoff]
-            return df
-        return pd.DataFrame()
-    except Exception as e:
-        # 回退：如果上面接口不支持这个ETF，尝试用 fund_etf_hist_em
-        logger.warning(f"ETF {symbol} NAV 接口失败，回退到行情价格: {e}")
-        try:
-            start = (datetime.now() - timedelta(days=days + 5)).strftime("%Y%m%d") if days else "20200101"
-            end = datetime.now().strftime("%Y%m%d")
-            df = ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date=start, end_date=end)
-            if df is not None and not df.empty:
-                df = df.sort_values("日期")
-                return df
-        except Exception as e2:
-            logger.error(f"ETF {symbol} 历史数据双重失败: {e2}")
-        return pd.DataFrame()
-
-
-# ── 场外基金 (OTC Fund) 净值 ─────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 场外基金净值
+# ═══════════════════════════════════════════════════════════════
 
 def fetch_otc_fund_nav(symbol: str) -> dict[str, Any] | None:
     """
-    获取场外基金最新净值和近期表现。
-    使用 akshare 基金信息接口，返回最新一条净值记录。
+    获取场外基金最新净值和近期历史（用于计算表现和技术指标）。
+    返回 { code, date, nav, daily_change, history: [{date, nav, daily_change}] }
     """
     try:
-        # 尝试用 akshare 获取基金净值走势
         df = ak.fund_open_fund_info_em(symbol=symbol, indicator="单位净值走势")
         if df is None or df.empty:
-            logger.warning(f"场外基金 {symbol} 无数据返回")
+            logger.warning(f"场外基金 {symbol} 无数据")
             return None
+
         df = df.sort_values("净值日期") if "净值日期" in df.columns else df
         latest = df.iloc[-1]
+
+        # 近期历史（最近120个交易日，足够计算季线+技术指标）
+        recent = df.iloc[-120:] if len(df) > 120 else df
+        history = []
+        for _, row in recent.iterrows():
+            history.append({
+                "date": str(row.get("净值日期", "")),
+                "nav": _safe_float(row.get("单位净值")),
+                "daily_change": _safe_float(row.get("日增长率", row.get("equityReturn", 0))),
+            })
+
         return {
             "code": symbol,
             "date": str(latest.get("净值日期", "")),
-            "nav": _safe_float(latest.get("单位净值", latest.get("累计净值"))),
+            "nav": _safe_float(latest.get("单位净值")),
             "daily_change": _safe_float(
-                latest.get("日增长率", latest.get("日增长值"))
+                latest.get("日增长率", latest.get("equityReturn", 0))
             ),
+            "history": history,
         }
     except Exception as e:
         logger.error(f"场外基金 {symbol} 数据抓取失败: {e}")
         return None
 
 
+def fetch_otc_fund_performance(history: list[dict[str, Any]]) -> dict[str, float | None]:
+    """
+    基于日增长率计算多周期表现（复合，天然处理拆分复权）。
+    输入 history 列表每项含 daily_change，返回 {w1, m1, m3, ytd}。
+    """
+    if not history:
+        return {"w1": None, "m1": None, "m3": None, "ytd": None}
+
+    def _compound(days: int) -> float | None:
+        chunk = history[-days:] if len(history) >= days else history
+        cumulative = 1.0
+        valid = 0
+        for item in chunk:
+            chg = item.get("daily_change")
+            if chg is not None and not (isinstance(chg, float) and pd.isna(chg)):
+                cumulative *= (1 + float(chg) / 100)
+                valid += 1
+        return round((cumulative - 1) * 100, 2) if valid > 0 else None
+
+    return {
+        "w1": _compound(5),
+        "m1": _compound(22),
+        "m3": _compound(66),
+        "ytd": _compound(140),
+    }
+
+
 def calc_period_return(df: pd.DataFrame, col: str = "单位净值", period_days: int = 7,
                        daily_change_col: str = "日增长率") -> float | None:
     """
-    计算区间收益率。
-    优先使用日增长率复合（避免拆分导致的净值跳变问题）；
-    如果日增长率不可用，回退到净值直接比较。
+    区间收益率（保留兼容旧接口）。
+    优先使用日增长率复合，回退到净值直接比较。
     """
     if df is None or df.empty or len(df) < 2:
         return None
     try:
-        # 优先：用日增长率逐日复合，天然处理拆分复权
         if daily_change_col in df.columns:
-            # 取最后 period_days 个交易日的日增长率
-            recent = df.iloc[-(period_days):]
+            recent = df.iloc[-period_days:]
             cumulative = 1.0
             valid_days = 0
             for _, row in recent.iterrows():
@@ -155,8 +115,6 @@ def calc_period_return(df: pd.DataFrame, col: str = "单位净值", period_days:
                     valid_days += 1
             if valid_days > 0:
                 return round((cumulative - 1) * 100, 2)
-
-        # 回退：净值直接比较（仅在无拆分的干净数据上准确）
         latest = float(df[col].iloc[-1])
         past_idx = max(0, len(df) - period_days - 1)
         past = float(df[col].iloc[past_idx])
@@ -167,36 +125,163 @@ def calc_period_return(df: pd.DataFrame, col: str = "单位净值", period_days:
         return None
 
 
-# ── 板块/指数数据 ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 指数估值（PE / PB / 分位）
+# ═══════════════════════════════════════════════════════════════
 
-def fetch_semiconductor_index() -> dict[str, Any]:
+# 基金代码 → CSI指数代码（用于 stock_zh_index_value_csindex 和 stock_zh_index_hist_csindex）
+# 以及 legulegu 风格名称（用于 stock_index_pe_lg / stock_index_pb_lg）
+FUND_INDEX_MAP: dict[str, dict[str, str]] = {
+    "019633": {"csi": "931743", "name": "半导体材料设备", "legu": None},
+    "003579": {"csi": "000300", "name": "沪深300", "legu": "沪深300"},
+    "011613": {"csi": "000688", "name": "科创50", "legu": None},
+    "025766": {"csi": None, "name": "港股通互联网", "legu": None},
+    "018927": {"csi": "931719", "name": "电池", "legu": None},
+}
+
+
+def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
     """
-    获取中证半导体材料设备主题指数 (931743) 近况。
-    如 931743 不可用，回退到 '半导体' 行业板块。
+    获取基金跟踪指数的PE/PB估值。
+    策略：
+    1. 如果是沪深300等宽基 → 用 stock_index_pe_lg / stock_index_pb_lg（含分位数据）
+    2. 如果有CSI代码 → 用 stock_zh_index_hist_csindex 取滚动PE + 手动算分位
+    3. 都没有 → 返回 None
+    返回 {index_name, pe, pe_percentile, pb, pb_percentile, update_time}
     """
+    if fund_code not in FUND_INDEX_MAP:
+        return None
+
+    info = FUND_INDEX_MAP[fund_code]
+    index_name = info["name"]
+
+    # ── 路径1: 宽基走 legulegu（自带分位） ──
+    if info.get("legu"):
+        try:
+            df_pe = ak.stock_index_pe_lg(symbol=info["legu"])
+            df_pb = ak.stock_index_pb_lg(symbol=info["legu"])
+            if df_pe is not None and not df_pe.empty and df_pb is not None and not df_pb.empty:
+                latest_pe = df_pe.iloc[-1]
+                latest_pb = df_pb.iloc[-1]
+                # legulegu列名含中文，直接按位置取
+                pe_val = _safe_float(latest_pe.iloc[3]) if len(latest_pe) > 3 else None   # 动态市盈率
+                pe_pct = _safe_float(latest_pe.iloc[4]) if len(latest_pe) > 4 else None   # 动态市盈率分位
+                pb_val = _safe_float(latest_pb.iloc[2]) if len(latest_pb) > 2 else None   # 市净率
+                pb_pct = _safe_float(latest_pb.iloc[4]) if len(latest_pb) > 4 else None   # 市净率分位
+                return {
+                    "index_name": index_name,
+                    "pe": pe_val,
+                    "pe_percentile": pe_pct,
+                    "pb": pb_val,
+                    "pb_percentile": pb_pct,
+                    "update_time": str(latest_pe.iloc[0]),
+                    "source": "legulegu",
+                }
+        except Exception as e:
+            logger.warning(f"legulegu PE/PB 获取失败 [{index_name}]: {e}")
+
+    # ── 路径2: CSI 指数走 csindex（滚动PE，无直接分位） ──
+    if info.get("csi"):
+        try:
+            df = ak.stock_zh_index_hist_csindex(
+                symbol=info["csi"], start_date="20190101", end_date="20300101"
+            )
+            if df is not None and not df.empty and "滚动市盈率" in df.columns:
+                df = df.dropna(subset=["滚动市盈率"])
+                if not df.empty:
+                    latest = df.iloc[-1]
+                    current_pe = _safe_float(latest.get("滚动市盈率"))
+                    # 手动计算历史分位
+                    pe_series = df["滚动市盈率"].dropna()
+                    pe_pct = round(
+                        (pe_series < current_pe).sum() / len(pe_series) * 100, 1
+                    ) if current_pe is not None and len(pe_series) > 0 else None
+                    return {
+                        "index_name": index_name,
+                        "pe": current_pe,
+                        "pe_percentile": pe_pct,
+                        "pb": None,
+                        "pb_percentile": None,
+                        "update_time": str(latest.get("日期", "")),
+                        "source": "csindex",
+                    }
+        except Exception as e:
+            logger.warning(f"csindex PE 获取失败 [{index_name} {info['csi']}]: {e}")
+
+    logger.warning(f"无法获取估值: {index_name} ({fund_code})")
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 市场情绪
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_market_turnover() -> dict[str, Any] | None:
+    """获取沪深两市总成交额（亿元）"""
     try:
-        df = ak.stock_board_industry_hist_em(symbol="半导体", period="日k", start_date="20260101", end_date="20500101")
+        df = ak.stock_zh_a_spot_em()
         if df is None or df.empty:
-            return {"name": "半导体板块", "latest": None, "change_pct": None}
-        df = df.sort_values("日期")
-        latest = df.iloc[-1]
-        prev = df.iloc[-2] if len(df) > 1 else latest
+            return None
+        total = df["成交额"].sum() / 1e8  # 转亿元
         return {
-            "name": "半导体板块",
-            "date": str(latest.get("日期", "")),
-            "close": _safe_float(latest.get("收盘")),
-            "change_pct": round(
-                float(latest.get("涨跌幅", 0)), 2
-            ),
-            "prev_close": _safe_float(prev.get("收盘")),
+            "total_turnover_yi": round(total, 0),
+            "stock_count": len(df),
         }
     except Exception as e:
-        logger.error(f"半导体板块数据抓取失败: {e}")
-        return {"name": "半导体板块", "latest": None, "change_pct": None}
+        logger.error(f"两市成交额获取失败: {e}")
+        return None
 
 
-def fetch_market_overview() -> dict[str, Any]:
-    """获取今日大盘概况：上证、深证、创业板涨跌"""
+def fetch_northbound_flow() -> dict[str, Any] | None:
+    """获取北向资金最近净买卖"""
+    try:
+        # 使用 stock_hsgt_hist_em 获取北向资金历史
+        df = ak.stock_hsgt_hist_em(symbol="北向资金")
+        if df is None or df.empty:
+            return {"warning": "北向资金数据不可用"}
+        # 过滤掉2024-08后的空数据行
+        df = df.dropna(subset=["当日成交净买额"])
+        if df.empty:
+            return {"warning": "北向资金数据不可用（2024-08后交易所不再披露逐笔数据）"}
+        latest = df.iloc[-1]
+        net_buy_yi = _safe_float(latest.get("当日成交净买额"))  # 亿
+        return {
+            "date": str(latest.get("日期", "")),
+            "net_flow_yi": net_buy_yi,
+            "data_note": "2024年8月后交易所不再披露逐笔买卖明细，仅汇总净额",
+        }
+    except Exception as e:
+        logger.error(f"北向资金获取失败: {e}")
+        return None
+
+
+def fetch_sector_fund_flow(sector_name: str = "半导体") -> dict[str, Any] | None:
+    """获取指定板块今日资金流向"""
+    try:
+        df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        match = df[df["名称"].str.contains(sector_name, case=False, na=False)]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        return {
+            "sector": str(row["名称"]),
+            "change_pct": _safe_float(row.get("今日涨跌幅")),
+            "main_net_inflow_yi": round(_safe_float(row.get("主力净流入-净额", 0)) / 1e8, 2),
+            "main_net_ratio": _safe_float(row.get("主力净流入-净占比")),
+            "super_large_net_yi": round(_safe_float(row.get("超大单净流入-净额", 0)) / 1e8, 2),
+            "large_net_yi": round(_safe_float(row.get("大单净流入-净额", 0)) / 1e8, 2),
+        }
+    except Exception as e:
+        logger.error(f"板块资金流向获取失败 [{sector_name}]: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 大盘指数
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_market_overview() -> dict[str, dict[str, Any]]:
+    """获取主要指数涨跌"""
     try:
         df = ak.stock_zh_index_spot_em()
         targets = ["上证指数", "深证成指", "创业板指", "科创50"]
@@ -212,113 +297,147 @@ def fetch_market_overview() -> dict[str, Any]:
                 }
         return overview
     except Exception as e:
-        logger.error(f"大盘数据抓取失败: {e}")
+        logger.error(f"大盘数据获取失败: {e}")
         return {}
 
 
-# ── 重仓股行情 ───────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 技术指标
+# ═══════════════════════════════════════════════════════════════
 
-HEAVY_HOLDINGS = [
-    ("688012", "中微公司"),
-    ("002371", "北方华创"),
-    ("688072", "拓荆科技"),
-    ("300604", "长川科技"),
-    ("688981", "中芯国际"),
-]
+def calc_technical_indicators(history: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    从净值历史序列计算技术指标。
+    输入: [{date, nav, daily_change}, ...]
+    返回: {ma20, ma60, price_vs_ma20, price_vs_ma60, rsi14, volume_note}
+    """
+    if not history or len(history) < 60:
+        return {"error": "数据不足，需要至少60个交易日"}
+
+    navs = [h["nav"] for h in history if h.get("nav") is not None]
+    if len(navs) < 60:
+        return {"error": f"有效净值数据不足 ({len(navs)}条)"}
+
+    latest_nav = navs[-1]
+
+    # 均线
+    ma20 = round(sum(navs[-20:]) / 20, 4) if len(navs) >= 20 else None
+    ma60 = round(sum(navs[-60:]) / 60, 4)
+    vs_ma20 = round((latest_nav - ma20) / ma20 * 100, 2) if ma20 else None
+    vs_ma60 = round((latest_nav - ma60) / ma60 * 100, 2)
+
+    # RSI(14) — 基于日增长率
+    changes = []
+    for h in history[-15:]:  # 需要15个数据点计算14个变化
+        chg = h.get("daily_change")
+        if chg is not None:
+            changes.append(float(chg))
+    if len(changes) >= 14:
+        gains = [c for c in changes[-14:] if c > 0]
+        losses = [abs(c) for c in changes[-14:] if c < 0]
+        avg_gain = sum(gains) / 14 if gains else 0
+        avg_loss = sum(losses) / 14 if losses else 0.0001
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = round(100 - (100 / (1 + rs)), 1)
+    else:
+        rsi = None
+
+    return {
+        "latest_nav": latest_nav,
+        "ma20": ma20,
+        "ma60": ma60,
+        "price_vs_ma20_pct": vs_ma20,
+        "price_vs_ma60_pct": vs_ma60,
+        "rsi14": rsi,
+        "data_points": len(navs),
+    }
 
 
-def fetch_heavy_holdings() -> list[dict[str, Any]]:
-    """获取关键重仓股今日行情"""
-    try:
-        df = ak.stock_zh_a_spot_em()
-        # 过滤出重仓股
-        codes = [h[0] for h in HEAVY_HOLDINGS]
-        df = df[df["代码"].isin(codes)]
-        results = []
-        for _, row in df.iterrows():
-            results.append({
-                "code": str(row["代码"]),
-                "name": str(row["名称"]),
-                "price": _safe_float(row["最新价"]),
-                "change_pct": _safe_float(row["涨跌幅"]),
-                "volume": _safe_float(row["成交量"]),
-                "amount": _safe_float(row["成交额"]),
-            })
-        return results
-    except Exception as e:
-        logger.error(f"重仓股行情抓取失败: {e}")
-        return []
-
-
-# ── 组装导出 ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 主入口
+# ═══════════════════════════════════════════════════════════════
 
 def fetch_all() -> dict[str, Any]:
     """
     主入口：抓取全部所需数据，返回结构化 dict。
+    全流程场外基金驱动。
     """
     ensure_data_dir()
     portfolio = load_portfolio()
 
-    # 分类基金代码
-    etf_codes = []
-    otc_codes = []
-    for h in portfolio.get("holdings", []):
-        code = str(h["code"])
-        if h.get("type") == "ETF":
-            etf_codes.append(code)
+    # 所有持仓都是场外基金
+    all_codes = [str(h["code"]) for h in portfolio.get("holdings", [])]
+
+    # ── 1. 场外基金净值 + 表现 + 技术面 ──
+    otc_data: dict[str, Any] = {}
+    otc_performance: dict[str, Any] = {}
+    otc_technical: dict[str, Any] = {}
+
+    for code in all_codes:
+        nav = fetch_otc_fund_nav(code)
+        otc_data[code] = nav
+        if nav and nav.get("history"):
+            otc_performance[code] = fetch_otc_fund_performance(nav["history"])
+            otc_technical[code] = calc_technical_indicators(nav["history"])
         else:
-            otc_codes.append(code)
+            otc_performance[code] = {"w1": None, "m1": None, "m3": None, "ytd": None}
+            otc_technical[code] = {"error": "无历史数据"}
 
-    # 加入 watchlist 中的 ETF
-    for w in portfolio.get("watchlist", []):
-        code = str(w["code"])
-        if code not in etf_codes:
-            etf_codes.append(code)
+    # ── 2. 指数估值 ──
+    index_valuations: dict[str, Any] = {}
+    for code in all_codes:
+        val = fetch_index_valuation(code)
+        if val:
+            index_valuations[code] = val
 
-    # 抓取
-    etf_data = fetch_etf_spot(etf_codes) if etf_codes else {}
-    otc_data = {code: fetch_otc_fund_nav(code) for code in otc_codes}
-    market = fetch_market_overview()
-    semiconductor = fetch_semiconductor_index()
-    heavy = fetch_heavy_holdings()
+    # ── 3. 市场情绪 ──
+    market_turnover = fetch_market_turnover()
+    northbound = fetch_northbound_flow()
+    semiconductor_flow = fetch_sector_fund_flow("半导体")
 
-    # ETF 计算近期涨跌幅（基于净值，已处理拆分复权）
-    etf_perf: dict[str, dict[str, Any]] = {}
-    for code in etf_codes:
-        hist = fetch_etf_hist(code)  # 获取全部历史数据，用于准确计算YTD等
-        if not hist.empty:
-            # 自动检测净值列名：优先用"单位净值"（来自 NAV 接口），回退到"收盘"
-            if "单位净值" in hist.columns:
-                nav_col = "单位净值"
-            elif "收盘" in hist.columns:
-                nav_col = "收盘"
-            else:
-                nav_col = hist.columns[1]  # 盲猜第二列是净值
-            etf_perf[code] = {
-                "w1": calc_period_return(hist, col=nav_col, period_days=5),
-                "m1": calc_period_return(hist, col=nav_col, period_days=22),
-                "m3": calc_period_return(hist, col=nav_col, period_days=66),
-                "ytd": calc_period_return(hist, col=nav_col, period_days=140),
-            }
-        else:
-            etf_perf[code] = {"w1": None, "m1": None, "m3": None, "ytd": None}
+    # ── 4. 大盘概况 ──
+    market_overview = fetch_market_overview()
 
     return {
         "timestamp": datetime.now().isoformat(),
         "portfolio": portfolio,
-        "etf_data": etf_data,
         "otc_data": otc_data,
-        "etf_performance": etf_perf,
-        "market_overview": market,
-        "semiconductor": semiconductor,
-        "heavy_holdings": heavy,
+        "otc_performance": otc_performance,
+        "otc_technical": otc_technical,
+        "index_valuations": index_valuations,
+        "market_turnover": market_turnover,
+        "northbound_flow": northbound,
+        "semiconductor_flow": semiconductor_flow,
+        "market_overview": market_overview,
     }
 
 
-# ── 工具函数 ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 缓存
+# ═══════════════════════════════════════════════════════════════
+
+def save_cache(data: dict[str, Any], filename: str = "latest_data.json") -> None:
+    save_json(os.path.join(DATA_DIR, filename), data)
+
+
+def load_cache(filename: str = "latest_data.json") -> dict[str, Any] | None:
+    path = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(path):
+        return None
+    try:
+        return load_json(path)
+    except Exception:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具
+# ═══════════════════════════════════════════════════════════════
 
 def _safe_float(val: Any) -> float | None:
-    """安全转型 float，失败返回 None"""
     if val is None:
         return None
     try:
@@ -328,28 +447,17 @@ def _safe_float(val: Any) -> float | None:
         return None
 
 
-def save_cache(data: dict[str, Any], filename: str = "latest_data.json") -> None:
-    """将抓取结果缓存到 data/ 目录"""
-    ensure_data_dir()
-    path = os.path.join(DATA_DIR, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-
-
-def load_cache(filename: str = "latest_data.json") -> dict[str, Any] | None:
-    """读取缓存数据"""
-    path = os.path.join(DATA_DIR, filename)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     data = fetch_all()
     save_cache(data)
-    print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    # 只打印摘要，不打印全量数据（太大）
+    print(f"Timestamp: {data['timestamp']}")
+    print(f"OTC funds: {list(data['otc_data'].keys())}")
+    for code, nav in data["otc_data"].items():
+        if nav:
+            print(f"  {code}: NAV={nav.get('nav')}, date={nav.get('date')}, hist={len(nav.get('history',[]))}点")
+    print(f"Index valuations: {list(data['index_valuations'].keys())}")
+    print(f"Market turnover: {data['market_turnover']}")
+    print(f"Semiconductor flow: {data['semiconductor_flow']}")
+    print("Done.")

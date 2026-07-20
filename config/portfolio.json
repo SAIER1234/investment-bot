@@ -1,16 +1,16 @@
 {
   "owner": "学生投资者",
-  "risk_profile": "激进",
+  "risk_profile": "机会驱动",
   "total_capital": 50800,
   "holdings": [
     {
-      "code": "159516",
-      "name": "半导体设备ETF国泰",
-      "type": "ETF",
+      "code": "019633",
+      "name": "半导体设备联接C",
+      "type": "场外基金",
       "amount": 20000,
       "cost_nav": null,
       "planned": true,
-      "note": "计划买入，尚未建仓"
+      "note": "计划买入，等回调入场。对应ETF 159516的场外联接基金"
     },
     {
       "code": "003579",
@@ -49,16 +49,5 @@
       "note": "已持有"
     }
   ],
-  "watchlist": [
-    {
-      "code": "561980",
-      "name": "半导体设备ETF招商",
-      "reason": "同板块对照标的，费率更低"
-    },
-    {
-      "code": "589100",
-      "name": "科创芯片ETF国泰",
-      "reason": "半导体上游芯片设计，与设备形成互补"
-    }
-  ]
+  "_comment": "全仓场外基金。交易记录通过微信告知Claude手动更新。"
 }
