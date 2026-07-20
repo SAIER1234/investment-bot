@@ -5,30 +5,6 @@
       "url": "https://thedankoe.com/feed/",
       "description": "创作者经济、自我提升、一人企业",
       "language": "en"
-    },
-    {
-      "name": "James Clear",
-      "url": "https://jamesclear.com/feed",
-      "description": "习惯养成、生产力、决策",
-      "language": "en"
-    },
-    {
-      "name": "Paul Graham",
-      "url": "http://www.aaronsw.com/2002/feeds/pgessays.rss",
-      "description": "创业、编程、思考方式",
-      "language": "en"
-    },
-    {
-      "name": "Tim Ferriss",
-      "url": "https://tim.blog/feed/",
-      "description": "效率工具、生活实验、投资",
-      "language": "en"
-    },
-    {
-      "name": "Seth Godin",
-      "url": "https://seths.blog/feed/",
-      "description": "市场营销、创意工作、每日短文",
-      "language": "en"
     }
   ],
   "twitter_handles": [
@@ -37,29 +13,11 @@
       "name": "Dan Koe",
       "description": "创作者经济、自我提升",
       "language": "en"
-    },
-    {
-      "handle": "naval",
-      "name": "Naval Ravikant",
-      "description": "创业、投资、人生哲学",
-      "language": "en"
-    },
-    {
-      "handle": "SahilBloom",
-      "name": "Sahil Bloom",
-      "description": "个人成长、财富积累",
-      "language": "en"
-    },
-    {
-      "handle": "AlexHormozi",
-      "name": "Alex Hormozi",
-      "description": "商业策略、获客、销售",
-      "language": "en"
     }
   ],
   "settings": {
-    "max_items_per_source": 3,
-    "lookback_hours": 48,
+    "max_items_per_source": 5,
+    "lookback_hours": 72,
     "nitter_instance": "https://nitter.net"
   }
 }

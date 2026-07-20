@@ -67,17 +67,9 @@ def push_report(
 def format_report_for_wechat(ai_report: str, timestamp: str) -> str:
     """
     将 AI 生成的报告格式化为适合微信阅读的版本。
-    PushPlus 的 markdown 模板支持基本 markdown 语法。
-    不需要大幅修改，主要加一个表头和表尾。
     """
-    header = (
-        f"> 📊 **每日投资报告**\n"
-        f"> {timestamp}\n\n"
-    )
-    footer = (
-        "\n\n---\n"
-        "*⚠️ 以上为AI生成的投资建议，仅供参考，不构成投资指令。投资有风险，入市需谨慎。*\n"
-    )
+    header = f"**📊 投资报告**  {timestamp}\n\n"
+    footer = "\n\n*⚠️ AI生成 · 仅供参考 · 不构成投资指令*"
     return header + ai_report + footer
 
 

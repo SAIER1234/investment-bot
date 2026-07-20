@@ -50,7 +50,10 @@ def main() -> int:
     date_str = now.strftime("%Y年%m月%d日")
     weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
 
-    content = f"> 🌅 **晨间晨报**\n> {date_str} {weekday}\n\n{report}\n\n---\n*🤖 AI自动聚合 · 仅供阅读参考*"
+    content = (
+        f"{report}"
+        f"\n\n*Dan Koe · 每日自动聚合 · {date_str}*"
+    )
 
     push_result = _push(
         title=f"🌅 晨报 | {date_str} {weekday}",

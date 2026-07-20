@@ -35,99 +35,47 @@ def load_system_prompt() -> str:
 
 
 def build_report_prompt(data: dict[str, Any]) -> str:
-    """将抓取到的数据组装成给 AI 分析的 prompt"""
+    """将数据组装成给 AI 分析的简洁 prompt"""
     portfolio = data.get("portfolio", {})
     holdings = portfolio.get("holdings", [])
-    watchlist = portfolio.get("watchlist", [])
     etf_data = data.get("etf_data", {})
     otc_data = data.get("otc_data", {})
     etf_perf = data.get("etf_performance", {})
-    market = data.get("market_overview", {})
-    smcd = data.get("semiconductor", {})
-    heavy = data.get("heavy_holdings", [])
 
-    prompt_parts = ["以下是今日收盘后的基金和市场数据，请基于此给出投资分析和操作建议。\n"]
+    lines = ["以下是今日数据，请生成投资分析。\n"]
 
-    # ── 大盘 ──
-    prompt_parts.append("## 今日大盘")
-    for name, info in market.items():
-        chg = info.get("change_pct")
-        chg_str = f"{chg:+.2f}%" if chg is not None else "N/A"
-        prompt_parts.append(f"- {name}: {info.get('price')}  ({chg_str})")
-
-    # ── 半导体板块 ──
-    prompt_parts.append(f"\n## 半导体板块\n- {smcd.get('name', '')}: "
-                        f"收盘 {smcd.get('close')}, 涨跌幅 {smcd.get('change_pct')}%")
-
-    # ── 持仓基金 ──
-    prompt_parts.append("\n## 持仓基金")
     for h in holdings:
         code = h["code"]
         name = h["name"]
         amount = h["amount"]
         planned = h.get("planned", False)
-        tag = " [计划买入，尚未建仓]" if planned else ""
-        prompt_parts.append(f"\n### {name} ({code}){tag}")
-        prompt_parts.append(f"- 投入金额: {amount}元")
-        prompt_parts.append(f"- 类型: {h.get('type', '')}")
+        tag = "（计划买入，尚未建仓）" if planned else ""
+
+        lines.append(f"## {name} {code} {tag}")
+        lines.append(f"投入: {amount}元 | 类型: {h.get('type', '')}")
 
         if code in etf_data:
             e = etf_data[code]
-            prompt_parts.append(f"- 最新价: {e.get('price')}")
-            prompt_parts.append(f"- 今日涨跌幅: {e.get('change_pct', 0):+.2f}%")
-            disc = e.get("discount_pct", 0) or 0
-            prompt_parts.append(f"- 折溢价率: {disc:+.2f}%")
-            nav = e.get("nav")
-            if nav:
-                prompt_parts.append(f"- IOPV/净值: {nav}")
-            # 近期表现
+            lines.append(f"今日: 价格{e.get('price')} 涨跌{e.get('change_pct', 0):+.2f}% 折溢价{e.get('discount_pct', 0) or 0:+.2f}%")
             perf = etf_perf.get(code, {})
             if perf:
-                prompt_parts.append(
-                    f"- 近一周: {_pct_str(perf.get('w1'))}  "
-                    f"近一月: {_pct_str(perf.get('m1'))}  "
-                    f"近三月: {_pct_str(perf.get('m3'))}  "
-                    f"今年以来: {_pct_str(perf.get('ytd'))}"
-                )
+                lines.append(f"表现: 周{_pct_str(perf.get('w1'))} 月{_pct_str(perf.get('m1'))} 季{_pct_str(perf.get('m3'))} 年{_pct_str(perf.get('ytd'))}")
         elif code in otc_data:
             o = otc_data[code]
             if o:
                 nav_date = str(o.get("date", ""))
                 today_str = data.get("timestamp", "")[:10]
-                stale_warning = ""
-                if nav_date and nav_date != today_str:
-                    stale_warning = f" ⚠️ 非今日数据！最新可用净值为 {nav_date} 公布"
-                prompt_parts.append(f"- 最新净值: {o.get('nav')}  (日期: {nav_date}){stale_warning}")
-                prompt_parts.append(f"- 日增长率: {o.get('daily_change', 0):+.2f}%" if o.get('daily_change') is not None else "- 日增长率: N/A")
+                stale = " ⚠️非今日" if nav_date and nav_date != today_str else ""
+                lines.append(f"净值: {o.get('nav')} ({nav_date}){stale} 日变动{o.get('daily_change', 0):+.2f}%")
             else:
-                prompt_parts.append("- 今日净值尚未公布或抓取失败")
+                lines.append("净值: 尚未公布")
 
-    # ── 关注标的 ──
-    if watchlist:
-        prompt_parts.append("\n## 关注列表（仅供参考）")
-        for w in watchlist:
-            code = w["code"]
-            name = w["name"]
-            prompt_parts.append(f"\n### {name} ({code})")
-            prompt_parts.append(f"- 关注理由: {w.get('reason', '')}")
-            if code in etf_data:
-                e = etf_data[code]
-                prompt_parts.append(f"- 最新价: {e.get('price')}, 涨跌幅: {e.get('change_pct', 0):+.2f}%")
+    # 元信息
+    lines.append(f"\n---")
+    lines.append(f"数据时间: {data.get('timestamp', '')[:19]}")
+    lines.append(f"投资者: 学生 总资金{portfolio.get('total_capital', 'N/A')}元 风格{portfolio.get('risk_profile', '')}")
 
-    # ── 重仓股 ──
-    if heavy:
-        prompt_parts.append("\n## 半导体设备核心重仓股今日表现")
-        for stock in heavy:
-            prompt_parts.append(
-                f"- {stock['name']}({stock['code']}): "
-                f"{stock.get('price')}  {stock.get('change_pct', 0):+.2f}%"
-            )
-
-    # ── 元信息 ──
-    prompt_parts.append(f"\n---\n数据时间: {data.get('timestamp', '')}")
-    prompt_parts.append(f"投资者画像: 学生, 总资金{portfolio.get('total_capital', 'N/A')}元, 风险偏好{portfolio.get('risk_profile', '')}")
-
-    return "\n".join(prompt_parts)
+    return "\n".join(lines)
 
 
 def call_deepseek(system_prompt: str, user_prompt: str, api_key: str) -> str:
