@@ -30,10 +30,11 @@ def load_sources() -> dict[str, Any]:
 # ── 博客 RSS ─────────────────────────────────────────────
 
 def fetch_blog_posts(blog: dict[str, Any], max_items: int = 3,
-                     lookback_hours: int = 48) -> list[dict[str, Any]]:
+                     lookback_hours: int = 168) -> list[dict[str, Any]]:
     """抓取单个博客的最近文章"""
     try:
         feed = feedparser.parse(blog["url"])
+        logger.info(f"[{blog['name']}] feed has {len(feed.entries)} entries, bozo={feed.bozo}")
         posts = []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
