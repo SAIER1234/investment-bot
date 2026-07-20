@@ -31,34 +31,49 @@ def load_sources() -> dict[str, Any]:
 
 def fetch_blog_posts(blog: dict[str, Any], max_items: int = 3,
                      lookback_hours: int = 168) -> list[dict[str, Any]]:
-    """抓取单个博客的最近文章"""
+    """抓取单个博客的最近文章。窗口内无新文章时回退到最近一篇。"""
     try:
         feed = feedparser.parse(blog["url"])
-        logger.info(f"[{blog['name']}] feed has {len(feed.entries)} entries, bozo={feed.bozo}")
-        posts = []
+        if not feed.entries:
+            logger.warning(f"[{blog['name']}] feed 无条目")
+            return []
+
+        posts: list[dict[str, Any]] = []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         for entry in feed.entries[:max_items]:
             pub_date = _parse_date(entry)
             if pub_date and pub_date < cutoff:
                 continue
+            posts.append(_make_item(blog, entry, pub_date))
 
-            posts.append({
-                "source": blog["name"],
-                "source_type": "blog",
-                "title": entry.get("title", ""),
-                "url": entry.get("link", ""),
-                "summary": _clean_html(entry.get("summary", entry.get("description", ""))),
-                "published": pub_date.isoformat() if pub_date else "",
-                "language": blog.get("language", "en"),
-                "description": blog.get("description", ""),
-            })
+        # 回退：窗口内无新文章 → 取最近一篇
+        if not posts:
+            entry = feed.entries[0]
+            pub_date = _parse_date(entry)
+            item = _make_item(blog, entry, pub_date)
+            item["title"] = f"[往期] {item['title']}"
+            posts.append(item)
+            logger.info(f"[{blog['name']}] 回退到最近一篇")
 
-        logger.info(f"[{blog['name']}] {len(posts)} new posts")
+        logger.info(f"[{blog['name']}] {len(posts)} posts")
         return posts
     except Exception as e:
-        logger.error(f"[{blog['name']}] RSS 抓取失败: {e}")
+        logger.error(f"[{blog['name']}] RSS 失败: {e}")
         return []
+
+
+def _make_item(blog: dict[str, Any], entry: Any, pub_date: datetime | None) -> dict[str, Any]:
+    return {
+        "source": blog["name"],
+        "source_type": "blog",
+        "title": entry.get("title", ""),
+        "url": entry.get("link", ""),
+        "summary": _clean_html(entry.get("summary", entry.get("description", ""))),
+        "published": pub_date.isoformat() if pub_date else "",
+        "language": blog.get("language", "en"),
+        "description": blog.get("description", ""),
+    }
 
 
 # ── Twitter（通过 Nitter RSS） ────────────────────────────
