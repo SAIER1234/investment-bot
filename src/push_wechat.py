@@ -91,7 +91,8 @@ def push_investment_report(ai_report: str, token: str | None = None) -> dict[str
     weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
 
     title = f"📊 投资报告 | {date_str} {weekday}"
-    topic = os.getenv("PUSHPLUS_TOPIC_INVEST", "investment")
+    # topic 留空：不在 PushPlus 创建群组则无需 topic
+    topic = os.getenv("PUSHPLUS_TOPIC_INVEST", "")
     content = format_report_for_wechat(ai_report, f"{date_str} {weekday}")
 
     return push_report(
