@@ -1,5 +1,4 @@
 {
-  "buildCommand": "rm -rf src wechat_server config data && pip install flask openai requests -q",
   "rewrites": [
     { "source": "/wechat", "destination": "/api/index" }
   ]
