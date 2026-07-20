@@ -17,7 +17,7 @@
   ],
   "settings": {
     "max_items_per_source": 5,
-    "lookback_hours": 72,
-    "nitter_instance": "https://nitter.net"
+    "lookback_hours": 168,
+    "nitter_instance": "https://nitter.privacydev.net"
   }
 }

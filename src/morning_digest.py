@@ -62,50 +62,67 @@ def fetch_blog_posts(blog: dict[str, Any], max_items: int = 3,
 
 # ── Twitter（通过 Nitter RSS） ────────────────────────────
 
+NITTER_INSTANCES = [
+    "https://nitter.privacydev.net",
+    "https://nitter.net",
+    "https://nitter.poast.org",
+]
+
+
 def fetch_tweets(handle_info: dict[str, Any], nitter_instance: str,
-                 max_items: int = 3, lookback_hours: int = 48) -> list[dict[str, Any]]:
-    """通过 Nitter RSS 获取用户最近推文"""
+                 max_items: int = 5, lookback_hours: int = 168) -> list[dict[str, Any]]:
+    """通过 Nitter RSS 获取用户最近推文，主实例失败自动切换备用"""
     handle = handle_info["handle"]
-    url = f"{nitter_instance}/{handle}/rss"
-    try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "MorningDigest/1.0"})
-        if resp.status_code != 200:
-            logger.warning(f"[@{handle}] Nitter 返回 {resp.status_code}")
-            return []
 
-        feed = feedparser.parse(resp.text.encode("utf-8") if isinstance(resp.text, str) else resp.text)
-        tweets = []
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-
-        for entry in feed.entries[:max_items]:
-            pub_date = _parse_date(entry)
-            if pub_date and pub_date < cutoff:
+    # 尝试多个 Nitter 实例
+    instances = [nitter_instance] + [i for i in NITTER_INSTANCES if i != nitter_instance]
+    for instance in instances:
+        url = f"{instance}/{handle}/rss"
+        try:
+            resp = requests.get(url, timeout=10, headers={"User-Agent": "MorningDigest/1.0"})
+            if resp.status_code != 200:
+                logger.warning(f"[@{handle}] {instance} 返回 {resp.status_code}")
                 continue
 
-            # Nitter RSS title 格式: "username: tweet content"
-            title = entry.get("title", "")
-            content = title.split(":", 1)[-1].strip() if ":" in title else title
+            feed = feedparser.parse(resp.content if isinstance(resp.content, bytes) else resp.text)
+            if not feed.entries:
+                logger.warning(f"[@{handle}] {instance} 无条目")
+                continue
 
-            tweets.append({
-                "source": handle_info["name"],
-                "source_type": "twitter",
-                "handle": handle,
-                "title": content[:100],
-                "url": entry.get("link", f"https://twitter.com/{handle}"),
-                "summary": content,
-                "published": pub_date.isoformat() if pub_date else "",
-                "language": handle_info.get("language", "en"),
-                "description": handle_info.get("description", ""),
-            })
+            tweets = []
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
-        logger.info(f"[@{handle}] {len(tweets)} new tweets")
-        return tweets
-    except requests.RequestException as e:
-        logger.error(f"[@{handle}] Nitter 连接失败: {e}")
-        return []
-    except Exception as e:
-        logger.error(f"[@{handle}] 解析失败: {e}")
-        return []
+            for entry in feed.entries[:max_items]:
+                pub_date = _parse_date(entry)
+                if pub_date and pub_date < cutoff:
+                    continue
+
+                title = entry.get("title", "")
+                content = title.split(":", 1)[-1].strip() if ":" in title else title
+
+                tweets.append({
+                    "source": handle_info["name"],
+                    "source_type": "twitter",
+                    "handle": handle,
+                    "title": content[:120],
+                    "url": entry.get("link", f"https://twitter.com/{handle}"),
+                    "summary": content,
+                    "published": pub_date.isoformat() if pub_date else "",
+                    "language": handle_info.get("language", "en"),
+                    "description": handle_info.get("description", ""),
+                })
+
+            logger.info(f"[@{handle}] {len(tweets)} tweets via {instance}")
+            return tweets
+        except requests.RequestException as e:
+            logger.warning(f"[@{handle}] {instance} 连接失败: {e}")
+            continue
+        except Exception as e:
+            logger.error(f"[@{handle}] {instance} 解析失败: {e}")
+            continue
+
+    logger.error(f"[@{handle}] 所有 Nitter 实例均不可用")
+    return []
 
 
 # ── 主入口 ────────────────────────────────────────────────
