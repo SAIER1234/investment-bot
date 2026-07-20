@@ -60,6 +60,9 @@ def _verify() -> str:
 def _chat(msg: str) -> str:
     if not msg:
         return "你好！试试问我：\n📊 持仓分析\n🔍 159516分析\n💡 操作建议\n✍️ Dan Koe"
+    # 快速诊断：先验证基础链路
+    if msg.strip() == "ping":
+        return "pong ✅ Flask+Vercel+WeChat 链路正常"
     try:
         r = AI.chat.completions.create(
             model="deepseek-chat",
