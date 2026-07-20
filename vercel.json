@@ -1,0 +1,14 @@
+{
+  "builds": [
+    {
+      "src": "api/wechat.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/wechat",
+      "dest": "/api/wechat.py"
+    }
+  ]
+}
