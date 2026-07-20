@@ -1,4 +1,10 @@
 {
+  "functions": {
+    "api/wechat.py": {
+      "memory": 256,
+      "maxDuration": 10
+    }
+  },
   "rewrites": [
     { "source": "/wechat", "destination": "/api/wechat" }
   ]
