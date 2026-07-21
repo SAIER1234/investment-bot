@@ -1,7 +1,7 @@
 {
   "owner": "学生投资者",
   "risk_profile": "机会驱动",
-  "total_capital": 50800,
+  "total_capital": 70800,
   "holdings": [
     {
       "code": "019633",
@@ -10,7 +10,16 @@
       "amount": 20000,
       "cost_nav": null,
       "planned": true,
-      "note": "计划买入，等回调入场。对应ETF 159516的场外联接基金"
+      "note": "计划买入，等市场底。与017811二选一，都是半导体设备方向"
+    },
+    {
+      "code": "017811",
+      "name": "东方人工智能混合C",
+      "type": "场外基金",
+      "amount": 20000,
+      "cost_nav": null,
+      "planned": true,
+      "note": "计划买入，等市场底。与019633二选一。主动基金，严凯管理，重仓半导体设备"
     },
     {
       "code": "003579",
@@ -43,11 +52,11 @@
       "code": "018927",
       "name": "电池",
       "type": "场外基金",
-      "amount": 7300,
+      "amount": 12300,
       "cost_nav": null,
       "planned": false,
-      "note": "已持有"
+      "note": "已持有。7月20日加仓5000元"
     }
   ],
-  "_comment": "全仓场外基金。交易记录通过微信告知Claude手动更新。"
+  "_comment": "全仓场外基金。总投资35800+现金35000=70800。019633和017811二选一等市场底。"
 }

@@ -133,6 +133,7 @@ def calc_period_return(df: pd.DataFrame, col: str = "单位净值", period_days:
 # 以及 legulegu 风格名称（用于 stock_index_pe_lg / stock_index_pb_lg）
 FUND_INDEX_MAP: dict[str, dict[str, str]] = {
     "019633": {"csi": "931743", "name": "半导体材料设备", "legu": None},
+    "017811": {"csi": "931743", "name": "半导体材料设备", "legu": None},  # 主动基金，持仓与019633高度重合
     "003579": {"csi": "000300", "name": "沪深300", "legu": "沪深300"},
     "011613": {"csi": "000688", "name": "科创50", "legu": None},
     "025766": {"csi": None, "name": "港股通互联网", "legu": None},
