@@ -1,7 +1,7 @@
 {
   "owner": "学生投资者",
   "risk_profile": "机会驱动",
-  "total_capital": 70800,
+  "total_capital": 71066,
   "holdings": [
     {
       "code": "019633",
@@ -25,7 +25,7 @@
       "code": "003579",
       "name": "沪深300",
       "type": "场外基金",
-      "amount": 9500,
+      "amount": 9333,
       "cost_nav": null,
       "planned": false,
       "note": "已持有"
@@ -34,7 +34,7 @@
       "code": "011613",
       "name": "科创50",
       "type": "场外基金",
-      "amount": 1400,
+      "amount": 1353,
       "cost_nav": null,
       "planned": false,
       "note": "已持有，仓位较轻"
@@ -43,7 +43,7 @@
       "code": "025766",
       "name": "港股通互联网",
       "type": "场外基金",
-      "amount": 12600,
+      "amount": 12938,
       "cost_nav": null,
       "planned": false,
       "note": "已持有"
@@ -52,11 +52,11 @@
       "code": "018927",
       "name": "电池",
       "type": "场外基金",
-      "amount": 32300,
+      "amount": 32442,
       "cost_nav": null,
       "planned": false,
-      "note": "7/20+5000, 7/21+20000。PE分位33%。目标PE分位50-60%(净值1.68-1.84)分批卖出，调仓半导体"
+      "note": "重仓。7/20+5000, 7/21+20000。PE分位33%。目标PE分位50-60%(净值1.68-1.84)分批卖出"
     }
   ],
-  "_comment": "全仓场外基金。已投55800+现金15000=70800。019633和017811等半导体市场底。电池做10%波段。"
+  "_comment": "已投56066+现金15000=71066。电池重仓等估值修复→调仓半导体。Bot每天21:00自动推送，不用盯盘。"
 }
