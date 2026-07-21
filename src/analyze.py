@@ -44,10 +44,10 @@ def _nav_stale_warning(fund_date: str, today: str) -> str:
     return ""
 
 
-def build_report_prompt(data: dict[str, Any]) -> str:
+def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | None = None) -> str:
     """
     将数据组装为结构化 prompt：
-    估值仪表盘 → 持仓数据 → 市场情绪 → 要求AI按固定框架输出。
+    估值仪表盘 → 持仓数据 → 市场情绪 → 基金雷达（如有）→ 要求AI按固定框架输出。
     """
     portfolio = data.get("portfolio", {})
     holdings = portfolio.get("holdings", [])
@@ -132,6 +132,15 @@ def build_report_prompt(data: dict[str, Any]) -> str:
 
         lines.append("")
 
+    # ── 基金雷达（每周扫描结果） ──
+    if scanner_data:
+        from src.fund_scanner import format_scanner_prompt
+        candidates = scanner_data.get("candidates", [])
+        if candidates:
+            scanner_prompt = format_scanner_prompt(candidates)
+            lines.append(scanner_prompt)
+            lines.append("")
+
     # ── 输出要求 ──
     lines.append("---")
     lines.append(f"数据时间: {data.get('timestamp', '')[:19]}")
@@ -144,7 +153,8 @@ def build_report_prompt(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def analyze(data: dict[str, Any], api_key: str | None = None) -> dict[str, str]:
+def analyze(data: dict[str, Any], api_key: str | None = None,
+            scanner_data: dict[str, Any] | None = None) -> dict[str, str]:
     """
     主入口：组装 prompt → 调 DeepSeek → 返回分析结果。
     返回 {"report": "...", "error": "..."} 二选一。
@@ -157,7 +167,7 @@ def analyze(data: dict[str, Any], api_key: str | None = None) -> dict[str, str]:
 
     try:
         system_prompt = load_system_prompt()
-        user_prompt = build_report_prompt(data)
+        user_prompt = build_report_prompt(data, scanner_data)
 
         logger.info("调用 DeepSeek API 生成投资建议...")
         report = call_deepseek(
