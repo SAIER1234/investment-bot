@@ -95,12 +95,14 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
         lines.append(f"### {name} `{code}` {tag}")
         lines.append(f"- 投入金额: {amount}元 | 类型: 场外基金 | 总资金占比: {amount/50800*100:.0f}%")
 
-        # 净值
+        # 净值 + 今日盈亏
         nav_data = otc_data.get(code)
         if nav_data:
             stale = _nav_stale_warning(str(nav_data.get("date", "")), today)
+            daily_chg = nav_data.get("daily_change") or 0
+            daily_pnl = round(amount * daily_chg / 100, 0)
             lines.append(f"- 净值: {nav_data.get('nav')} (日期:{nav_data.get('date')}){stale}")
-            lines.append(f"- 日变动: {_pct_str(nav_data.get('daily_change'))}")
+            lines.append(f"- 今日: {_pct_str(daily_chg)} | 盈亏: {daily_pnl:+.0f}元")
         else:
             lines.append("- 净值: 尚未公布")
 
@@ -141,10 +143,20 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
             lines.append(scanner_prompt)
             lines.append("")
 
+    # ── 组合总盈亏 ──
+    total_daily_pnl = 0.0
+    for h in holdings:
+        code = h["code"]
+        nav_data = otc_data.get(code)
+        if nav_data:
+            chg = nav_data.get("daily_change") or 0
+            total_daily_pnl += h["amount"] * chg / 100
+    lines.append(f"**今日组合总盈亏: {total_daily_pnl:+.0f}元**")
+
     # ── 输出要求 ──
     lines.append("---")
     lines.append(f"数据时间: {data.get('timestamp', '')[:19]}")
-    lines.append(f"投资者: 学生 | 总资金50800元 | 风格=机会驱动 | 全部场外基金")
+    lines.append(f"投资者: 学生 | 总资金70800元 | 风格=机会驱动 | 全部场外基金")
     lines.append("")
     lines.append("**请严格按照系统提示词的格式输出报告。**")
     lines.append("对 planned=true 的标的，重点判断入场时机，给出具体净值区间和金额。")
