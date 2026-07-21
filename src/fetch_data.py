@@ -156,7 +156,7 @@ def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
     info = FUND_INDEX_MAP[fund_code]
     index_name = info["name"]
 
-    # ── 路径1: 宽基走 legulegu（自带分位） ──
+    # ── 路径1: 宽基走 legulegu ──
     if info.get("legu"):
         try:
             df_pe = ak.stock_index_pe_lg(symbol=info["legu"])
@@ -164,11 +164,14 @@ def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
             if df_pe is not None and not df_pe.empty and df_pb is not None and not df_pb.empty:
                 latest_pe = df_pe.iloc[-1]
                 latest_pb = df_pb.iloc[-1]
-                # legulegu列名含中文，直接按位置取
-                pe_val = _safe_float(latest_pe.iloc[3]) if len(latest_pe) > 3 else None   # 动态市盈率
-                pe_pct = _safe_float(latest_pe.iloc[4]) if len(latest_pe) > 4 else None   # 动态市盈率分位
-                pb_val = _safe_float(latest_pb.iloc[2]) if len(latest_pb) > 2 else None   # 市净率
-                pb_pct = _safe_float(latest_pb.iloc[4]) if len(latest_pb) > 4 else None   # 市净率分位
+                # PE: col[3]=动态市盈率, 手动计算分位（legulegu内置分位不可靠）
+                pe_val = _safe_float(latest_pe.iloc[3]) if len(latest_pe) > 3 else None
+                pe_series = df_pe.iloc[:, 3].dropna()
+                pe_pct = round((pe_series < pe_val).sum() / len(pe_series) * 100, 1) if pe_val is not None and len(pe_series) > 0 else None
+                # PB: col[2]=市净率
+                pb_val = _safe_float(latest_pb.iloc[2]) if len(latest_pb) > 2 else None
+                pb_series = df_pb.iloc[:, 2].dropna()
+                pb_pct = round((pb_series < pb_val).sum() / len(pb_series) * 100, 1) if pb_val is not None and len(pb_series) > 0 else None
                 return {
                     "index_name": index_name,
                     "pe": pe_val,
@@ -176,7 +179,7 @@ def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
                     "pb": pb_val,
                     "pb_percentile": pb_pct,
                     "update_time": str(latest_pe.iloc[0]),
-                    "source": "legulegu",
+                    "source": "legulegu (manual pct)",
                 }
         except Exception as e:
             logger.warning(f"legulegu PE/PB 获取失败 [{index_name}]: {e}")
