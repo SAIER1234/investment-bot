@@ -2,8 +2,9 @@ name: 晨间晨报
 
 on:
   schedule:
-    # 北京时间 08:00 = UTC 00:00, 每天运行
-    - cron: "0 0 * * *"
+    # 北京时间 05:00 (UTC+8) = UTC 21:00 (前一天)
+    # GitHub Actions 排队延迟~2h，5点触发≈7点收到
+    - cron: "0 21 * * *"
   workflow_dispatch:  # 允许手动触发测试
 
 jobs:

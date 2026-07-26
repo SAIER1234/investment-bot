@@ -1,41 +1,56 @@
 """
 晨间晨报 — AI 摘要模块
-将 Dan Koe 的博客和推文通过 DeepSeek 翻译+提炼为中文晨报。
+有 Dan Koe 新内容时翻译+提炼，没有时生成投资大师+斯多葛每日智慧。
 """
 
 import logging
 import os
+from datetime import datetime
 from typing import Any
 
 from src.llm import create_deepseek_client, DEEPSEEK_MODEL, DEFAULT_DIGEST_TEMP, DEFAULT_DIGEST_TOKENS
 
 logger = logging.getLogger(__name__)
 
-MORNING_SYSTEM_PROMPT = """你是 Dan Koe 的中文内容编辑。用户每天早上读你的推送来获取 Dan Koe 最新的思想精华。
+DAN_KOE_PROMPT = """你是 Dan Koe 的中文内容编辑。用户每天早上读你的推送获取 Dan Koe 的最新思想。
 
-格式要求（非常重要）：
-- 推文和博客分开，推文在前，博客在后
-- 每条翻译要保留 Dan Koe 的直接、有冲击力的语调，不要软化成鸡汤
-- 每条内容后面用小字标注来源类型
+格式要求：
+- 推文和博客分开，推文在前博客在后
+- 每条翻译保留 Dan Koe 直接有冲击力的语调，不软化成鸡汤
 - 最后选一条"今日必读"，用 > 引用块突出
-- 整篇控制在手机两屏以内
+- 整篇手机两屏以内
 
-如果没有新内容（只有[往期]标记的文章）：
-- 回顾那篇往期文章的精华，标注"今日回顾"
-- 简短即可，不用硬凑长度
+排版：用 --- 分隔板块，每条用 • 开头。不要过多emoji。"""
 
-排版规则：
-- 用 --- 分隔不同板块
-- 每条用 • 开头
-- 英文人名、书名、专业术语保留原文并括号翻译
-- 不要用过多emoji，保持干净"""
+WISDOM_PROMPT = """你是用户的晨间智慧导师。今天没有Dan Koe新内容，请生成一段投资哲学+斯多葛智慧的晨间推送。
+
+内容来源（轮换使用，每天选一个方向）：
+- 投资大师语录：巴菲特、芒格、霍华德·马克斯、彼得·林奇、查理·芒格
+- 斯多葛哲学：马可·奥勒留《沉思录》、塞涅卡、爱比克泰德
+- 投资经典金句：《投资最重要的事》《穷查理宝典》《聪明的投资者》《股票作手回忆录》
+- 市场心理学：恐惧与贪婪、耐心、纪律、逆向思维
+
+格式：
+1. 用 > 引用块放一句今日核心语录（注明出处）
+2. 用3-5句话解读这句话——和投资有什么关系，和当下的市场有什么联系
+3. 最后给一个"今日思考"——一个开放性问题让用户今天想一想
+4. 整篇控制在手机一屏以内
+
+语调：像聪明朋友在早餐桌上聊天。不说教，不鸡汤化。保持智识的锋利感。"""
+
+
+def has_fresh_content(items: list[dict[str, Any]]) -> bool:
+    """判断是否有新内容（非回退往期）"""
+    if not items:
+        return False
+    for item in items:
+        if "[往期]" not in item.get("title", ""):
+            return True
+    return False
 
 
 def build_digest_prompt(items: list[dict[str, Any]], timestamp: str) -> str:
     """把抓取到的内容组装成 prompt"""
-    if not items:
-        return "今天 Dan Koe 没有发布新内容。请生成一条简短的'今日无更新'晨报，回顾一句Dan Koe的经典理念，鼓励读者保持 consistency。"
-
     blogs = [i for i in items if i.get("source_type") == "blog"]
     tweets = [i for i in items if i.get("source_type") == "twitter"]
 
@@ -57,11 +72,6 @@ def build_digest_prompt(items: list[dict[str, Any]], timestamp: str) -> str:
                 lines.append(f"   摘要: {summary}")
         lines.append("")
 
-    # 标记哪些是回退的往期内容
-    fallback = [i for i in items if "[往期]" in i.get("title", "")]
-    if fallback:
-        lines.append("注意：以上有[往期]标记的不是新内容，是今天没新内容做的回退。")
-
     return "\n".join(lines)
 
 
@@ -73,15 +83,7 @@ def generate_digest(items: list[dict[str, Any]], api_key: str | None = None) -> 
     if not api_key:
         return {"error": "未设置 DEEPSEEK_API_KEY"}
 
-    if not items:
-        # 完全没内容时给一个 fallback
-        return {"report": (
-            "**今天 Dan Koe 还没发新内容。**\n\n"
-            "> Consistency beats intensity.\n"
-            "> 他没发，不等于你不该做你的事。"
-        )}
-
-    from datetime import datetime
+    fresh = has_fresh_content(items)
     now = datetime.now()
     weekday_list = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
     weekday = weekday_list[now.weekday()]
@@ -89,16 +91,32 @@ def generate_digest(items: list[dict[str, Any]], api_key: str | None = None) -> 
 
     try:
         client = create_deepseek_client(api_key)
-        user_prompt = build_digest_prompt(items, timestamp)
+
+        if fresh:
+            system_prompt = DAN_KOE_PROMPT
+            user_prompt = build_digest_prompt(items, timestamp)
+            temp = DEFAULT_DIGEST_TEMP
+            max_tok = DEFAULT_DIGEST_TOKENS
+        else:
+            # 用日期作为随机种子，让每天选的语录方向不同
+            day_seed = now.day
+            system_prompt = WISDOM_PROMPT
+            user_prompt = (
+                f"今天是{timestamp}。请生成今日晨间智慧推送。\n"
+                f"今天的日期数字是{day_seed}，可以用它来选一个主题方向"
+                f"（{day_seed}%4==0→巴菲特/芒格, ==1→斯多葛, ==2→投资经典, ==3→市场心理学）。"
+            )
+            temp = 0.9  # 更高温度让鸡汤每天不一样
+            max_tok = 1024
 
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": MORNING_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=DEFAULT_DIGEST_TEMP,
-            max_tokens=DEFAULT_DIGEST_TOKENS,
+            temperature=temp,
+            max_tokens=max_tok,
         )
 
         report = response.choices[0].message.content or ""
