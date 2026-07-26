@@ -11,7 +11,7 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 # 默认超参（各模块可覆盖）
 DEFAULT_INVEST_TEMP = 0.7     # 投资报告
