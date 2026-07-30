@@ -219,8 +219,68 @@ def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 市场情绪
+# 全球宏观指标
 # ═══════════════════════════════════════════════════════════════
+
+def fetch_global_indicators() -> dict[str, Any]:
+    """获取全球跨市场比较指标：美股趋势、黄金、中美利差"""
+    result: dict[str, Any] = {}
+
+    # 1. 美股走势（道指作为美股温度计）
+    try:
+        df_us = ak.index_us_stock_sina()
+        if df_us is not None and not df_us.empty:
+            latest = df_us.iloc[-1]
+            prev_m = df_us.iloc[-22] if len(df_us) >= 22 else df_us.iloc[0]
+            ret_1m = (float(latest['close']) / float(prev_m['close']) - 1) * 100
+            result["us_dow"] = {
+                "close": round(float(latest["close"]), 0),
+                "date": str(latest["date"])[:10],
+                "ret_1m": round(ret_1m, 1),
+            }
+    except Exception as e:
+        logger.warning(f"美股数据获取失败: {e}")
+
+    # 2. 黄金价格
+    try:
+        df_gold = ak.spot_golden_benchmark_sge()
+        if df_gold is not None and not df_gold.empty:
+            latest = df_gold.iloc[-1]
+            result["gold"] = {
+                "price": _safe_float(latest.iloc[1]) if len(latest) > 1 else None,
+                "date": str(latest.iloc[0])[:10],
+            }
+    except Exception as e:
+        logger.warning(f"黄金数据获取失败: {e}")
+
+    # 3. 中美利差（中国10年期 - 美国10年期）
+    try:
+        df_rate = ak.bond_zh_us_rate()
+        if df_rate is not None and not df_rate.empty:
+            latest = df_rate.iloc[-1]
+            cn_10y = _safe_float(latest.get("中国国债收益率10年"))
+            us_10y = _safe_float(latest.get("美国国债收益率10年"))
+            if cn_10y and us_10y:
+                result["yield_spread"] = {
+                    "cn_10y": round(cn_10y, 2),
+                    "us_10y": round(us_10y, 2),
+                    "spread": round(cn_10y - us_10y, 2),
+                    "date": str(latest.get("日期", ""))[:10],
+                }
+    except Exception as e:
+        logger.warning(f"中美利差获取失败: {e}")
+
+    # 4. 全球概览一句话
+    summary_parts = []
+    if "us_dow" in result:
+        summary_parts.append(f"美股道指{result['us_dow']['close']:.0f}(月{result['us_dow']['ret_1m']:+.1f}%)")
+    if "gold" in result and result["gold"]["price"]:
+        summary_parts.append(f"黄金{result['gold']['price']}元/克")
+    if "yield_spread" in result:
+        summary_parts.append(f"中美利差{result['yield_spread']['spread']:+.2f}%")
+    result["summary"] = " | ".join(summary_parts) if summary_parts else "全球数据暂缺"
+
+    return result
 
 def fetch_market_turnover() -> dict[str, Any] | None:
     """获取沪深两市总成交额（亿元）"""
@@ -407,6 +467,9 @@ def fetch_all() -> dict[str, Any]:
     # ── 4. 大盘概况 ──
     market_overview = fetch_market_overview()
 
+    # ── 5. 全球宏观 ──
+    global_indicators = fetch_global_indicators()
+
     return {
         "timestamp": datetime.now().isoformat(),
         "portfolio": portfolio,
@@ -418,6 +481,7 @@ def fetch_all() -> dict[str, Any]:
         "northbound_flow": northbound,
         "semiconductor_flow": semiconductor_flow,
         "market_overview": market_overview,
+        "global_indicators": global_indicators,
     }
 
 

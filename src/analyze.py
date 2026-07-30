@@ -81,6 +81,24 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
                      f"净占比{semi_flow.get('main_net_ratio', 0) or 0:+.2f}% "
                      f"涨跌{semi_flow.get('change_pct', 0) or 0:+.2f}%")
 
+    # ── 全球宏观 ──
+    global_ind = data.get("global_indicators", {})
+    if global_ind and global_ind.get("summary"):
+        lines.append(f"\n**🌍 全球:** {global_ind['summary']}")
+        # A-share season
+        hs300_val = index_val.get("003579", {})
+        hs300_pe = hs300_val.get("pe_percentile")
+        if hs300_pe is not None:
+            if hs300_pe < 30:
+                season = "🌸春（低估，适合重仓）"
+            elif hs300_pe < 60:
+                season = "☀️夏（合理，持有为主）"
+            elif hs300_pe < 80:
+                season = "🍂秋（偏贵，只卖不买）"
+            else:
+                season = "❄️冬（高估，减仓到防御）"
+            lines.append(f"**A股季节:** {season} (沪深300 PE分位={hs300_pe:.0f}%)")
+
     lines.append("")
 
     # ── 每支基金详细数据 ──
