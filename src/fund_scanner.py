@@ -41,6 +41,22 @@ SECTOR_KEYWORDS: dict[str, list[str]] = {
     "量子/前沿": ["量子", "核聚变", "超导"],
     "海外": ["纳斯达克", "标普", "全球", "海外", "港股通"],
     "债券/固收": ["债券", "转债", "纯债", "信用"],
+    "资源/商品": ["煤炭", "有色", "黄金", "原油", "豆粕", "能源", "资源", "矿业", "石油", "天然气"],
+    "日本": ["日本", "日经", "东京"],
+    "印度": ["印度"],
+    "越南": ["越南"],
+    "欧洲": ["欧洲", "德国", "法国", "英国", "富时", "DAX"],
+}
+
+# QDII基金市场分组（用于全球温度计）
+MARKET_KEYWORDS: dict[str, list[str]] = {
+    "🇺🇸 美股": ["纳斯达克", "标普", "美国", "美股", "道琼斯"],
+    "🇯🇵 日本": ["日本", "日经", "东京"],
+    "🇮🇳 印度": ["印度"],
+    "🇻🇳 越南": ["越南"],
+    "🇪🇺 欧洲": ["欧洲", "德国", "法国", "英国", "富时"],
+    "🌏 亚太": ["亚太", "亚洲", "新兴市场"],
+    "🌐 全球": ["全球", "世界"],
 }
 
 # 用户已持仓的基金代码（避免重复推荐）
@@ -275,6 +291,43 @@ def scan_if_needed(data_dir: str | None = None) -> dict[str, Any] | None:
             pass
 
     return None
+
+
+def classify_market(name: str) -> str:
+    """根据基金名称归类全球市场"""
+    for market, keywords in MARKET_KEYWORDS.items():
+        for kw in keywords:
+            if kw in name:
+                return market
+    return "🇨🇳 A股/港股"
+
+
+def global_temperature_gauge(candidates: list[dict[str, Any]]) -> str:
+    """
+    从扫描候选列表中生成全球温度计——各市场平均表现和最佳基金。
+    """
+    if not candidates:
+        return "暂无全球数据"
+
+    # 按市场分组
+    markets: dict[str, list[dict[str, Any]]] = {}
+    for c in candidates:
+        mkt = classify_market(c["name"])
+        if mkt not in markets:
+            markets[mkt] = []
+        markets[mkt].append(c)
+
+    lines = ["**🌐 全球市场温度计**\n"]
+    for mkt in ["🇨🇳 A股/港股", "🇺🇸 美股", "🇯🇵 日本", "🇮🇳 印度", "🇻🇳 越南", "🇪🇺 欧洲", "🌏 亚太", "🌐 全球"]:
+        if mkt in markets:
+            funds = markets[mkt]
+            avg_3m = sum(f.get("perf_3m", 0) or 0 for f in funds) / len(funds)
+            avg_1y = sum(f.get("perf_1y", 0) or 0 for f in funds) / len(funds)
+            best = max(funds, key=lambda f: f.get("score", 0))
+            direction = "📈" if avg_3m > 0 else "📉"
+            lines.append(f"{mkt}: 近3月{avg_3m:+.1f}% 近1年{avg_1y:+.1f}% {direction} 最佳:{best['name']}({best['code']})")
+
+    return "\n".join(lines)
 
 
 def format_scanner_prompt(candidates: list[dict[str, Any]]) -> str:

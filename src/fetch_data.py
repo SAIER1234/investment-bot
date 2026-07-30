@@ -270,7 +270,32 @@ def fetch_global_indicators() -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"中美利差获取失败: {e}")
 
-    # 4. 全球概览一句话
+    # 4. 全球QDII温度（从QDII基金表现反推各市场方向）
+    try:
+        qdii_df = ak.fund_open_fund_rank_em(symbol="QDII")
+        if qdii_df is not None and not qdii_df.empty:
+            # 分类统计
+            markets = {
+                "美股": ["纳斯达克","标普","美国","美股","道琼斯"],
+                "日本": ["日本","日经"],
+                "印度": ["印度"],
+                "越南": ["越南"],
+                "欧洲": ["欧洲","德国","英国","法国"],
+                "全球": ["全球"],
+            }
+            qdii_summary = []
+            for mkt_name, keywords in markets.items():
+                mkt_funds = qdii_df[qdii_df.iloc[:,2].str.contains('|'.join(keywords), case=False, na=False)]
+                if not mkt_funds.empty:
+                    avg_1m = mkt_funds.iloc[:,8].dropna().astype(float).mean()
+                    avg_3m = mkt_funds.iloc[:,9].dropna().astype(float).mean()
+                    qdii_summary.append(f"{mkt_name}(月{avg_1m:+.1f}%/季{avg_3m:+.1f}%)")
+            if qdii_summary:
+                result["qdii_summary"] = " | ".join(qdii_summary)
+    except Exception as e:
+        logger.warning(f"QDII温度获取失败: {e}")
+
+    # 5. 全球概览一句话
     summary_parts = []
     if "us_dow" in result:
         summary_parts.append(f"美股道指{result['us_dow']['close']:.0f}(月{result['us_dow']['ret_1m']:+.1f}%)")
@@ -278,6 +303,8 @@ def fetch_global_indicators() -> dict[str, Any]:
         summary_parts.append(f"黄金{result['gold']['price']}元/克")
     if "yield_spread" in result:
         summary_parts.append(f"中美利差{result['yield_spread']['spread']:+.2f}%")
+    if "qdii_summary" in result:
+        summary_parts.append(result["qdii_summary"])
     result["summary"] = " | ".join(summary_parts) if summary_parts else "全球数据暂缺"
 
     return result

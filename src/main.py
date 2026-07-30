@@ -19,6 +19,8 @@ from src.fetch_data import fetch_all, save_cache
 from src.analyze import analyze
 from src.push_wechat import push_investment_report, push_error_notification
 from src.fund_scanner import scan_if_needed
+from src.industry_monitor import monthly_scan, format_industry_prompt
+from datetime import date
 
 
 def main() -> int:
@@ -55,9 +57,20 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"基金扫描失败（非致命）: {e}")
 
+    # ── Step 2.5: 月度行业扫描（仅每月第一天） ──
+    industry_signals = None
+    if date.today().day == 1:
+        logger.info("Step 2.5/4: 月度行业信号扫描...")
+        try:
+            signals = monthly_scan()
+            industry_signals = format_industry_prompt(signals)
+            logger.info("月度行业扫描完成")
+        except Exception as e:
+            logger.warning(f"月度行业扫描失败（非致命）: {e}")
+
     # ── Step 3: AI 分析 ──
     logger.info("Step 3/4: DeepSeek 生成投资建议...")
-    result = analyze(data, scanner_data=scanner_data)
+    result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals)
     if "error" in result:
         logger.error(f"AI 分析失败: {result['error']}")
         if token:
