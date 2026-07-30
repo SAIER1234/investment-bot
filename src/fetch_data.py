@@ -139,6 +139,7 @@ FUND_INDEX_MAP: dict[str, dict[str, str]] = {
     "025766": {"csi": None, "name": "港股通互联网", "legu": None,
                "note": "港股指数，akshare无可靠PE分位数据源。勿编造分位。"},
     "018927": {"csi": "931719", "name": "电池", "legu": None},
+    "002910": {"csi": None, "name": "供给改革", "legu": "沪深300"},  # 主动基金，基准沪深300×65%
 }
 
 
