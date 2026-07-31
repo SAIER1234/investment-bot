@@ -134,12 +134,12 @@ def calc_period_return(df: pd.DataFrame, col: str = "单位净值", period_days:
 FUND_INDEX_MAP: dict[str, dict[str, str]] = {
     "019633": {"csi": "931743", "name": "半导体材料设备", "legu": None},
     "017811": {"csi": "931743", "name": "半导体材料设备", "legu": None},  # 主动基金，持仓与019633高度重合
-    "003579": {"csi": "000300", "name": "沪深300", "legu": "沪深300"},
+    "003579": {"csi": "000300", "name": "沪深300", "legu": None},  # 用csindex不用legulegu(分位更准确)
     "011613": {"csi": "000688", "name": "科创50", "legu": None},
     "025766": {"csi": None, "name": "港股通互联网", "legu": None,
                "note": "港股指数，akshare无可靠PE分位数据源。勿编造分位。"},
     "018927": {"csi": "931719", "name": "电池", "legu": None},
-    "002910": {"csi": None, "name": "供给改革", "legu": "沪深300"},  # 主动基金，基准沪深300×65%
+    "002910": {"csi": "000300", "name": "供给改革", "legu": None},  # 主动基金，用沪深300 csindex作参考
 }
 
 
