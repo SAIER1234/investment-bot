@@ -1,6 +1,6 @@
 """
-逻辑验证器 — 每月自动检查持仓"买入逻辑是否仍然成立"
-不靠AI判断，直接算数字。输出明确结论。
+逻辑验证器 — 配置驱动，自动检查持仓"买入逻辑是否仍然成立"
+每只基金在portfolio.json中可配置 verify_with 字段指定验证方式。
 """
 
 import json
@@ -18,90 +18,131 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-SNAPSHOT_FILE = "pe_snapshot.json"  # 存储历史PE快照
+SNAPSHOT_FILE = "pe_snapshot.json"
 
+# ── 验证方式解析 ──────────────────────────────────────
+
+# verify_with 字段格式：
+#   "931719" → 直接用该CSI指数PE
+#   "" 或 null → 跳过验证（该基金无可验证PE数据）
+#   不存在该字段 → 跳过验证
+
+def _get_verifiable_holdings() -> list[dict[str, Any]]:
+    """读取portfolio，返回所有可验证的持仓（有 verify_with 字段且非空）"""
+    portfolio = load_json(os.path.join(CONFIG_DIR, "portfolio.json"))
+    result = []
+    for h in portfolio.get("holdings", []):
+        if h.get("planned"):
+            continue
+        verify_code = h.get("verify_with", "").strip()
+        if verify_code:
+            h["_verify_code"] = verify_code
+            result.append(h)
+    return result
+
+
+# ── 快照 ──────────────────────────────────────────────
 
 def take_snapshot() -> dict[str, dict[str, Any]]:
-    """对当前持仓的每只基金拍照：日期、PE、PE分位"""
-    portfolio = load_json(os.path.join(CONFIG_DIR, "portfolio.json"))
-    holdings = [h for h in portfolio.get("holdings", []) if not h.get("planned")]
+    """
+    对所有可验证持仓拍照：日期、PE、PE分位、净值。
+    每天运行积累历史数据。
+    """
+    verifiable = _get_verifiable_holdings()
+    if not verifiable:
+        logger.info("无可验证持仓，跳过快照")
+        return {}
 
-    snapshot: dict[str, dict[str, Any]] = {}
     today = date.today().isoformat()
+    snapshot: dict[str, dict[str, Any]] = {}
 
-    from src.fetch_data import fetch_index_valuation
-    from src.fetch_data import fetch_otc_fund_nav
+    from src.fetch_data import fetch_index_valuation, fetch_otc_fund_nav
 
-    for h in holdings:
+    for h in verifiable:
         code = h["code"]
-        val = fetch_index_valuation(code)
+        verify_code = h["_verify_code"]
+
+        # 用 verify_with 指定的指数获取PE
+        val = fetch_index_valuation_direct(verify_code)
         nav = fetch_otc_fund_nav(code)
 
         entry = {
             "date": today,
+            "fund_code": code,
+            "verify_index": verify_code,
             "pe": val.get("pe") if val else None,
             "pe_pct": val.get("pe_percentile") if val else None,
             "nav": nav.get("nav") if nav else None,
-            "daily_change": nav.get("daily_change") if nav else None,
         }
         snapshot[code] = entry
+        logger.info(f"快照: {code} PE={entry['pe']} PE分位={entry['pe_pct']}%")
 
-    # 加载旧快照列表
+    # 存储
     ensure_data_dir()
     path = os.path.join(DATA_DIR, SNAPSHOT_FILE)
-    history = {}
-    if os.path.exists(path):
-        try:
-            history = load_json(path)
-        except Exception:
-            history = {}
-
-    # 追加新快照（按日期索引）
+    history = load_json(path) if os.path.exists(path) else {}
     if today not in history:
         history[today] = {}
-
     for code, entry in snapshot.items():
         history[today][code] = entry
-
     save_json(path, history)
-    logger.info(f"PE快照已保存: {today}, {len(snapshot)}只基金")
+
+    logger.info(f"快照已保存: {today}, {len(snapshot)}只")
     return snapshot
+
+
+def fetch_index_valuation_direct(index_code: str) -> dict[str, Any] | None:
+    """用CSI指数代码直接获取PE和分位"""
+    try:
+        df = ak.stock_zh_index_hist_csindex(symbol=index_code, start_date="20050101", end_date="20300101")
+        pe_col = "滚动市盈率"
+        df_c = df.dropna(subset=[pe_col])
+        if df_c.empty:
+            return None
+        pe_series = df_c[pe_col]
+        latest = df_c.iloc[-1]
+        cur_pe = float(latest[pe_col])
+        cur_pct = round((pe_series < cur_pe).sum() / len(pe_series) * 100, 1)
+        return {
+            "index_name": str(index_code),
+            "pe": round(cur_pe, 1),
+            "pe_percentile": cur_pct,
+            "update_time": str(latest.get("日期", "")),
+            "source": "csindex direct",
+        }
+    except Exception as e:
+        logger.warning(f"指数{index_code} PE获取失败: {e}")
+        return None
 
 
 def verify() -> dict[str, Any]:
     """
-    主入口：验证每只持仓的买入逻辑。
-    对比当前PE分位 vs 三个月前PE分位。
-    返回 {基金代码: {verdict, reason, action}}
+    主入口：只验证 portfolio.json 中配置了 verify_with 的持仓。
+    对比当前PE分位 vs 90天前。自动计算利润变化。
     """
-    today = date.today()
-    three_months_ago = today - timedelta(days=90)
+    verifiable = _get_verifiable_holdings()
+    if not verifiable:
+        return {"error": "portfolio.json中无verify_with配置，无可验证持仓"}
 
-    # 找最接近三个月前的快照
+    today = date.today()
     path = os.path.join(DATA_DIR, SNAPSHOT_FILE)
+
     if not os.path.exists(path):
-        return {"error": "无PE快照数据。请先运行take_snapshot()积累数据。"}
+        return {"error": "无快照数据。take_snapshot()尚未积累足够数据。"}
 
     history = load_json(path)
     dates = sorted(history.keys())
-    if len(dates) < 2:
-        return {"error": f"快照数据不足（仅{len(dates)}天）"}
 
-    # 找最接近三个月前的快照
-    target = three_months_ago.isoformat()
-    past_date = None
-    for d in sorted(dates):
+    # 找90天前最接近的快照
+    target = (today - timedelta(days=90)).isoformat()
+    past_date = dates[0]
+    for d in dates:
         if d < target:
             past_date = d
         else:
             break
 
-    if not past_date:
-        # 没有三个月前的数据，用最早的那天
-        past_date = dates[0]
-
     if today.isoformat() not in history:
-        # 今天还没拍照，先拍
         take_snapshot()
         history = load_json(path)
 
@@ -109,63 +150,68 @@ def verify() -> dict[str, Any]:
     past = history.get(past_date, {})
 
     results: dict[str, Any] = {}
-    for code in current:
+    alert_triggered = False
+
+    for code, cur in current.items():
         if code not in past:
+            results[code] = {"verdict": "数据积累中", "reason": "快照<90天，再等等", "action": "无"}
             continue
 
-        cur = current[code]
         pst = past[code]
-
         cur_pe_pct = cur.get("pe_pct")
         past_pe_pct = pst.get("pe_pct")
-
         if cur_pe_pct is None or past_pe_pct is None:
-            results[code] = {
-                "verdict": "数据不足",
-                "reason": "PE分位数据缺失",
-                "action": "无法判断",
-            }
+            results[code] = {"verdict": "数据不足", "reason": "PE分位缺失", "action": "无"}
             continue
 
         delta_pct = round(cur_pe_pct - past_pe_pct, 1)
         cur_nav = cur.get("nav")
         past_nav = pst.get("nav")
-        nav_change = round((cur_nav / past_nav - 1) * 100, 1) if cur_nav and past_nav else None
         cur_pe = cur.get("pe")
         past_pe = pst.get("pe")
 
-        if delta_pct > 5:
-            # PE分位上升了超过5个百分点 — 要检查利润
-            if nav_change is not None and nav_change < 0:
-                # NAV跌了+PE分位升了 = 陷阱信号
+        # 利润变化 ≈ 净值变化 - PE变化（PE公式倒推）
+        profit_change = None
+        if cur_pe and past_pe and cur_pe > 0 and past_pe > 0 and cur_nav and past_nav:
+            pe_change = (cur_pe / past_pe - 1) * 100
+            nav_change = (cur_nav / past_nav - 1) * 100
+            profit_change = round(nav_change - pe_change, 1)
+
+        # 判断逻辑：PE分位变化>5个百分点 + 利润变化
+        if abs(delta_pct) <= 5:
+            results[code] = {"verdict": "✅ 稳定", "reason": f"PE分位变化{delta_pct:+.1f}%，估值平稳", "action": "继续持有"}
+        elif delta_pct > 5:
+            if profit_change is not None and profit_change < 0:
+                alert_triggered = True
                 results[code] = {
-                    "verdict": "⚠️ 警惕",
-                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}%→{cur_pe_pct}%），但净值{nav_change:+.1f}%。PE分位被动上升=利润可能在恶化",
-                    "action": "检查利润数据。如果利润确实下滑→触发W2，减2/3仓",
+                    "verdict": "⚠️ W2触发",
+                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}→{cur_pe_pct}%），利润约{profit_change:+.1f}%。PE被动上升=利润恶化",
+                    "action": "减2/3仓。PE涨了但利润在跌，买入逻辑被证伪。",
+                }
+            elif profit_change is not None and profit_change > 0:
+                results[code] = {
+                    "verdict": "✅ 健康",
+                    "reason": f"PE分位+{delta_pct}%，但利润约{profit_change:+.1f}%，跑赢PE扩张",
+                    "action": "继续持有。利润驱动，非情绪。",
                 }
             else:
-                # PE分位升了但NAV在涨 — 可能是利润驱动
+                alert_triggered = True
                 results[code] = {
-                    "verdict": "🟡 关注",
-                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}%→{cur_pe_pct}%），净值{nav_change:+.1f}%",
-                    "action": "确认利润增速。如果利润增速>PE扩张→正常；否则→W1，减半仓",
+                    "verdict": "🟡 W1触发",
+                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}→{cur_pe_pct}%），利润约{profit_change or '?'}",
+                    "action": "减半仓。PE跑赢利润，价格已超过价值。",
                 }
-        elif delta_pct < -5:
+        else:  # delta < -5
             results[code] = {
-                "verdict": "✅ 健康",
-                "reason": f"PE分位{delta_pct:+.1f}%（{past_pe_pct}%→{cur_pe_pct}%），估值在改善",
-                "action": "继续持有",
-            }
-        else:
-            results[code] = {
-                "verdict": "✅ 稳定",
-                "reason": f"PE分位变化不大（{delta_pct:+.1f}%），估值未见显著恶化",
+                "verdict": "✅ 改善",
+                "reason": f"PE分位{delta_pct:+.1f}%（{past_pe_pct}→{cur_pe_pct}%），估值在改善",
                 "action": "继续持有",
             }
 
     return {
         "date": today.isoformat(),
         "past_date": past_date,
+        "has_alert": alert_triggered,
         "results": results,
     }
 
