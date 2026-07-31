@@ -7,10 +7,41 @@ import logging
 import os
 from typing import Any
 
-from src.common import CONFIG_DIR
+from src.common import CONFIG_DIR, disable_proxy
 from src.llm import call_deepseek, DEFAULT_INVEST_TEMP, DEFAULT_INVEST_TOKENS
 
+disable_proxy()
+import akshare as ak
+
 logger = logging.getLogger(__name__)
+
+
+def _get_season() -> dict[str, Any]:
+    """独立获取A股季节——不依赖portfolio持仓。永远抓沪深300 PE。"""
+    try:
+        df = ak.stock_zh_index_hist_csindex(symbol='000300', start_date='20050101', end_date='20300101')
+        pe_col = '滚动市盈率'
+        df_c = df.dropna(subset=[pe_col])
+        pe_s = df_c[pe_col]
+        cur_pe = round(float(pe_s.iloc[-1]), 2)
+        cur_pct = round((pe_s < cur_pe).sum() / len(pe_s) * 100, 1)
+        cur_date = str(df_c.iloc[-1]['日期'])[:10]
+
+        if cur_pct < 30:
+            season, guidance = '春', '>70%'
+        elif cur_pct < 60:
+            season, guidance = '夏', '50-70%'
+        elif cur_pct < 80:
+            season, guidance = '秋', '<50%'
+        else:
+            season, guidance = '冬', '<30%'
+
+        return {
+            'season': season, 'pe': cur_pe, 'pe_pct': cur_pct,
+            'guidance': guidance, 'date': cur_date,
+        }
+    except Exception:
+        return {'season': '?', 'pe': None, 'pe_pct': None, 'guidance': '?', 'date': None}
 
 
 def load_system_prompt() -> str:
@@ -87,19 +118,14 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
     global_ind = data.get("global_indicators", {})
     if global_ind and global_ind.get("summary"):
         lines.append(f"\n**🌍 全球:** {global_ind['summary']}")
-        # A-share season
-        hs300_val = index_val.get("003579", {})
-        hs300_pe = hs300_val.get("pe_percentile")
-        if hs300_pe is not None:
-            if hs300_pe < 30:
-                season = "🌸春（低估，适合重仓）"
-            elif hs300_pe < 60:
-                season = "☀️夏（合理，持有为主）"
-            elif hs300_pe < 80:
-                season = "🍂秋（偏贵，只卖不买）"
-            else:
-                season = "❄️冬（高估，减仓到防御）"
-            lines.append(f"**A股季节:** {season} (沪深300 PE分位={hs300_pe:.0f}%)")
+
+    # A-share season — 独立计算，不依赖portfolio
+    season_data = _get_season()
+    if season_data['pe_pct'] is not None:
+        s = season_data
+        lines.append(f"**A股季节:** {s['season']} | 沪深300 PE={s['pe']} 分位={s['pe_pct']}% | 建议A股仓位{s['guidance']} | 日期{s['date']}")
+    else:
+        lines.append("**A股季节:** 数据暂缺")
 
     lines.append("")
 
