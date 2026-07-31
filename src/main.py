@@ -20,6 +20,7 @@ from src.analyze import analyze
 from src.push_wechat import push_investment_report, push_error_notification
 from src.fund_scanner import scan_if_needed
 from src.industry_monitor import monthly_scan, format_industry_prompt
+from src.logic_verifier import take_snapshot, verify, format_verification
 from datetime import date
 
 
@@ -57,10 +58,28 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"基金扫描失败（非致命）: {e}")
 
-    # ── Step 2.5: 月度行业扫描（仅每月第一天） ──
+    # ── Step 2.5: 逻辑验证 + 月度行业扫描 ──
+    logic_check = None
     industry_signals = None
+
+    # PE快照（每次运行都拍，积累历史数据）
+    try:
+        take_snapshot()
+    except Exception as e:
+        logger.warning(f"PE快照失败（非致命）: {e}")
+
+    # 逻辑验证（每次运行都做）
+    try:
+        check_result = verify()
+        if "error" not in check_result:
+            logic_check = format_verification(check_result)
+            logger.info("逻辑验证完成")
+    except Exception as e:
+        logger.warning(f"逻辑验证失败（非致命）: {e}")
+
+    # 月度行业扫描（仅每月第一天）
     if date.today().day == 1:
-        logger.info("Step 2.5/4: 月度行业信号扫描...")
+        logger.info("月度行业信号扫描...")
         try:
             signals = monthly_scan()
             industry_signals = format_industry_prompt(signals)
@@ -70,7 +89,8 @@ def main() -> int:
 
     # ── Step 3: AI 分析 ──
     logger.info("Step 3/4: DeepSeek 生成投资建议...")
-    result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals)
+    result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
+                     logic_check=logic_check)
     if "error" in result:
         logger.error(f"AI 分析失败: {result['error']}")
         if token:
