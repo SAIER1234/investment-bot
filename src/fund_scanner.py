@@ -358,6 +358,8 @@ def format_scanner_prompt(candidates: list[dict[str, Any]]) -> str:
     lines.append("请从以上候选中，选出 **1-3支** 最适合用户的基金作为本周推荐。")
     lines.append("选择标准：前景好 + 估值合理 + 费率合理 + 与用户现有持仓形成互补（不要和已持有的高度重复）。")
     lines.append("对每支推荐基金，给出：推荐理由（2-3条）、建议仓位、适合什么时机买入。")
+    lines.append("")
+    lines.append("**⚠️ 这是日常参考，不是S/A级操作信号。不要给操作建议，只描述基金是什么、为什么值得关注。用户追求低频好机会，大部分推荐只是让他知道方向。**")
 
     return "\n".join(lines)
 
