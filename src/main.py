@@ -21,6 +21,7 @@ from src.push_wechat import push_investment_report, push_error_notification
 from src.fund_scanner import scan_if_needed
 from src.industry_monitor import monthly_scan, format_industry_prompt
 from src.logic_verifier import take_snapshot, verify, format_verification
+from src.global_rotation import fetch_global_rotation_data
 from datetime import date
 
 
@@ -87,10 +88,29 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"月度行业扫描失败（非致命）: {e}")
 
+    # ── Step 2.6: 全球轮动数据（每周五刷新） ──
+    logger.info("Step 2.6/4: 全球轮动数据...")
+    global_rotation = None
+    try:
+        # 从已有数据提取沪深300 PE和中国10Y国债（避免重复请求）
+        from src.analyze import _get_season as get_a_season
+        season_data = get_a_season()
+        csi_pe = season_data.get("pe")
+        # 中国10Y从已缓存的global_indicators取
+        cn_10y = None
+        global_ind = data.get("global_indicators", {})
+        yield_spread = global_ind.get("yield_spread", {})
+        if yield_spread:
+            cn_10y = yield_spread.get("cn_10y")
+        global_rotation = fetch_global_rotation_data(csi_pe=csi_pe, cn_10y=cn_10y)
+        logger.info("全球轮动数据获取完成")
+    except Exception as e:
+        logger.warning(f"全球轮动数据获取失败（非致命）: {e}")
+
     # ── Step 3: AI 分析 ──
     logger.info("Step 3/4: DeepSeek 生成投资建议...")
     result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
-                     logic_check=logic_check)
+                     logic_check=logic_check, global_rotation=global_rotation)
     if "error" in result:
         logger.error(f"AI 分析失败: {result['error']}")
         if token:

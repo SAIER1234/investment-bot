@@ -4,3 +4,4 @@ requests==2.32.3
 python-dotenv==1.0.1
 feedparser==6.0.11
 pandas==2.2.3
+yfinance>=0.2.0
