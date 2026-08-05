@@ -70,18 +70,34 @@ def fetch_stock_financials(stock_code: str) -> dict[str, Any] | None:
         prev_year = df.iloc[-5] if len(df) >= 5 else df.iloc[0]  # 去年同期（4个季度前）
 
         def _num(val: Any) -> float | None:
-            """解析数字，处理'490.34亿'这种格式"""
+            """解析数字，处理'490.34亿', '41.98%'等格式"""
+            import re
             try:
                 if isinstance(val, (int, float)):
                     return float(val) if not pd.isna(float(val)) else None
-                s = str(val).replace(',', '').replace(' ', '')
-                if '亿' in s:
-                    return float(s.replace('亿', ''))
-                if '万' in s:
-                    return float(s.replace('万', '')) / 10000
-                if s == 'False' or s == '':
+                s = str(val).replace(',', '').replace(' ', '').strip()
+                if s == 'False' or s == '' or s == '--':
                     return None
-                return float(s)
+                # 去掉百分号
+                is_pct = s.endswith('%')
+                s = s.rstrip('%')
+                # 匹配数字部分：可能以中文单位结尾
+                m = re.match(r'^(-?[\d.]+)(.*)$', s)
+                if not m:
+                    return None
+                num = float(m.group(1))
+                unit = m.group(2)
+                # 中文单位转换
+                if '亿' in unit:
+                    pass  # already in 亿
+                elif '万' in unit:
+                    num = num / 10000
+                elif unit and unit != '':
+                    # 未知后缀，可能是编码问题导致的，忽略
+                    pass
+                if is_pct:
+                    return round(num, 2)  # 百分比直接返回数值
+                return round(num, 2)
             except (ValueError, TypeError):
                 return None
 
@@ -196,21 +212,29 @@ def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any
 
     if profit_ok and revenue_ok:
         result["verdict"] = "✅ 逻辑成立"
-        result["detail"] = (f"Top{checked}成分股: 利润中位数{med_profit:+.1f}%({profit_ratio:.0f}%公司正增长), "
-                           f"营收中位数{med_rev:+.1f}%({rev_ratio:.0f}%公司正增长)")
+        mp = f"{med_profit:+.1f}%" if med_profit is not None else "?"
+        mr = f"{med_rev:+.1f}%" if med_rev is not None else "?"
+        result["detail"] = (f"Top{checked}成分股: 利润中位数{mp}({profit_ratio:.0f}%公司正增长), "
+                           f"营收中位数{mr}({rev_ratio:.0f}%公司正增长)")
         result["ok"] = True
     elif not profit_ok and not revenue_ok:
+        mp = f"{med_profit:+.1f}%" if med_profit is not None else "?"
+        mr = f"{med_rev:+.1f}%" if med_rev is not None else "?"
         result["verdict"] = "❌ 逻辑破裂"
-        result["detail"] = (f"Top{checked}成分股: 利润中位数{med_profit:+.1f}%({profit_ratio:.0f}%公司正增长), "
-                           f"营收中位数{med_rev:+.1f}%({rev_ratio:.0f}%公司正增长)")
+        result["detail"] = (f"Top{checked}成分股: 利润中位数{mp}({profit_ratio:.0f}%公司正增长), "
+                           f"营收中位数{mr}({rev_ratio:.0f}%公司正增长)")
     elif not profit_ok:
+        mp = f"{med_profit:+.1f}%" if med_profit is not None else "?"
+        mr = f"{med_rev:+.1f}%" if med_rev is not None else "?"
         result["verdict"] = "⚠️ 利润恶化"
-        result["detail"] = (f"Top{checked}成分股: 利润中位数{med_profit:+.1f}%({profit_ratio:.0f}%公司正增长), "
-                           f"但营收中位数{med_rev:+.1f}%({rev_ratio:.0f}%公司正增长) — 利润跟不上营收，需关注")
+        result["detail"] = (f"Top{checked}成分股: 利润中位数{mp}({profit_ratio:.0f}%公司正增长), "
+                           f"但营收中位数{mr}({rev_ratio:.0f}%公司正增长) — 利润跟不上营收，需关注")
     else:
+        mp = f"{med_profit:+.1f}%" if med_profit is not None else "?"
+        mr = f"{med_rev:+.1f}%" if med_rev is not None else "?"
         result["verdict"] = "🟡 营收放缓"
-        result["detail"] = (f"Top{checked}成分股: 利润中位数{med_profit:+.1f}%({profit_ratio:.0f}%公司正增长), "
-                           f"但营收中位数{med_rev:+.1f}%({rev_ratio:.0f}%公司正增长) — 营收放缓但利润还在，暂时可接受")
+        result["detail"] = (f"Top{checked}成分股: 利润中位数{mp}({profit_ratio:.0f}%公司正增长), "
+                           f"但营收中位数{mr}({rev_ratio:.0f}%公司正增长) — 营收放缓但利润还在，暂时可接受")
 
     result["stock_details"] = stock_details
     return result
