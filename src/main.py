@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 
-from src.common import disable_proxy
+from src.common import DATA_DIR, disable_proxy, ensure_data_dir, load_json, save_json
 
 disable_proxy()
 
@@ -88,7 +88,7 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"逻辑验证失败（非致命）: {e}")
 
-    # 月度行业扫描 + 基本面验证（仅每月第一天）
+    # 月度行业扫描（仅每月第一天）
     if date.today().day == 1:
         logger.info("月度行业信号扫描...")
         try:
@@ -98,18 +98,58 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"月度行业扫描失败（非致命）: {e}")
 
-        logger.info("月度基本面验证（成分股财报）...")
+    # 基本面验证（每月1日刷新，或缓存超过30天刷新，或首次运行）
+    fundamental_cache = os.path.join(DATA_DIR, "fundamental_check_cache.json")
+    fundamental_prompt = ""
+    need_fundamental = False
+    if date.today().day == 1:
+        need_fundamental = True
+        logger.info("每月1日，刷新基本面验证...")
+    elif not os.path.exists(fundamental_cache):
+        need_fundamental = True
+        logger.info("首次运行，执行基本面验证...")
+    else:
+        try:
+            cache = load_json(fundamental_cache)
+            last_check = cache.get("check_date", "")[:10]
+            if last_check:
+                days_since = (date.today() - date.fromisoformat(last_check)).days
+                if days_since > 30:
+                    need_fundamental = True
+                    logger.info(f"基本面缓存{days_since}天未刷新，重新验证...")
+                else:
+                    fundamental_prompt = cache.get("prompt", "")
+                    logger.info(f"复用基本面缓存 ({days_since}天前, {last_check})")
+        except Exception:
+            need_fundamental = True
+
+    if need_fundamental:
         try:
             fundamental = check_all_holdings()
             fundamental_prompt = format_fundamental_prompt(fundamental)
-            # 追加到 logic_check 后面
-            if logic_check:
-                logic_check = logic_check + "\n" + fundamental_prompt
-            else:
-                logic_check = fundamental_prompt
+            # 缓存结果
+            ensure_data_dir()
+            save_json(fundamental_cache, {
+                "check_date": date.today().isoformat(),
+                "verdicts": fundamental.get("verdicts", []),
+                "prompt": fundamental_prompt,
+            })
             logger.info(f"基本面验证完成: {fundamental.get('verdicts', [])}")
         except Exception as e:
             logger.warning(f"基本面验证失败（非致命）: {e}")
+            # 尝试复用旧缓存
+            if os.path.exists(fundamental_cache):
+                try:
+                    fundamental_prompt = load_json(fundamental_cache).get("prompt", "")
+                except Exception:
+                    pass
+
+    # 追加基本面验证到逻辑验证
+    if fundamental_prompt:
+        if logic_check:
+            logic_check = logic_check + "\n" + fundamental_prompt
+        else:
+            logic_check = fundamental_prompt
 
     # ── Step 2.6: 全球轮动数据（每周五刷新） ──
     logger.info("Step 2.6/4: 全球轮动数据...")
