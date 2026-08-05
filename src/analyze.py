@@ -5,6 +5,7 @@ AI 分析模块
 
 import logging
 import os
+from datetime import datetime
 from typing import Any
 
 from src.common import CONFIG_DIR, disable_proxy
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 def _get_season() -> dict[str, Any]:
     """独立获取A股季节——不依赖portfolio持仓。永远抓沪深300 PE。"""
     try:
-        df = ak.stock_zh_index_hist_csindex(symbol='000300', start_date='20050101', end_date='20300101')
+        df = ak.stock_zh_index_hist_csindex(symbol='000300', start_date='20050101', end_date=f'{datetime.now().year+5}0101')
         pe_col = '滚动市盈率'
         df_c = df.dropna(subset=[pe_col])
         pe_s = df_c[pe_col]
@@ -42,6 +43,28 @@ def _get_season() -> dict[str, Any]:
         }
     except Exception:
         return {'season': '?', 'pe': None, 'pe_pct': None, 'guidance': '?', 'date': None}
+
+
+def _detect_holiday(data: dict[str, Any]) -> str | None:
+    """检测是否节假日休市。返回警告字符串或None。"""
+    signals = 0
+    # 信号1: 成交额极低（<100亿）
+    turnover = data.get("market_turnover", {})
+    if turnover:
+        t = turnover.get("total_turnover_yi", 99999)
+        if t is not None and t < 100:
+            signals += 1
+    # 信号2: 半数以上净值日期不是今天
+    today = data.get("timestamp", "")[:10]
+    otc_data = data.get("otc_data", {})
+    if otc_data:
+        stale = sum(1 for n in otc_data.values()
+                    if n and str(n.get("date", ""))[:10] != today)
+        if stale >= len(otc_data) * 0.5:
+            signals += 1
+    if signals >= 2:
+        return "⚠️ 疑似节假日休市，以下数据为最近交易日数据，非今日实时。"
+    return None
 
 
 def load_system_prompt() -> str:
@@ -97,6 +120,12 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
 
     lines = []
 
+    # ── 节假日检测 ──
+    holiday_warning = _detect_holiday(data)
+    if holiday_warning:
+        lines.append(holiday_warning)
+        lines.append("")
+
     # ── 市场环境 ──
     lines.append("## 市场环境\n")
     if market:
@@ -120,8 +149,8 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
     if global_ind and global_ind.get("summary"):
         lines.append(f"\n**🌍 全球:** {global_ind['summary']}")
 
-    # A-share season — 独立计算，不依赖portfolio
-    season_data = _get_season()
+    # A-share season — 优先使用main.py预抓取的数据，避免重复下载
+    season_data = data.get("csi_season") or _get_season()
     if season_data['pe_pct'] is not None:
         s = season_data
         lines.append(f"**A股季节:** {s['season']} | 沪深300 PE={s['pe']} 分位={s['pe_pct']}% | 建议A股仓位{s['guidance']} | 日期{s['date']}")
@@ -188,6 +217,13 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
                          f"vsMA60={_pct_str(tech.get('price_vs_ma60_pct'))} | "
                          f"RSI(14)={tech.get('rsi14')}")
 
+        lines.append("")
+
+    # ── 集中度提醒 ──
+    total_capital = portfolio.get("total_capital", 1)
+    max_pct = max(h["amount"] / total_capital * 100 for h in holdings) if holdings else 0
+    if max_pct > 45:
+        lines.append(f"⚠️ 集中度提醒: 单基最高{max_pct:.0f}%，超过45%。关注分散风险。")
         lines.append("")
 
     # ── 逻辑验证（代码自动计算，每次都有） ──

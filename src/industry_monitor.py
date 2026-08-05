@@ -80,10 +80,8 @@ def fetch_hk_internet_signals() -> dict[str, Any]:
 
 
 def fetch_002910_signals() -> dict[str, Any]:
-    """002910 核心仓信号"""
-    signals: dict[str, Any] = {}
-    signals["经理状态"] = "杨宗昌在任（未检测到变更）"
-    return signals
+    """002910 核心仓信号。经理变更由用户自行关注，bot不自动检测。"""
+    return {"经理状态": "未检测（杨宗昌管理，用户自行关注）"}
 
 
 def monthly_scan() -> dict[str, dict[str, Any]]:

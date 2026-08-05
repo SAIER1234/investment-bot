@@ -262,16 +262,6 @@ def fetch_global_rotation_data(csi_pe: float | None = None,
     spy_pct = spy_data.get("price_pct")  # 价格分位 ≈ PE分位
     qqq_pct = qqq_data.get("price_pct")
 
-    # 如果调用方没传csi_pe，尝试自己获取
-    if csi_pe is None:
-        try:
-            from src.analyze import _get_season as get_a_season
-            a_data = get_a_season()
-            a_pct = a_data.get("pe_pct")
-            csi_pe = a_data.get("pe")
-        except Exception:
-            pass
-
     seasons = get_global_seasons(a_pct, spy_pct, qqq_pct)
     s2 = check_s2_signal(a_pct, spy_pct, qqq_pct)
     s3 = check_s3_signal(a_pct, spy_pct, qqq_pct)

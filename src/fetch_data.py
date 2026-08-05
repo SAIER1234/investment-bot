@@ -190,7 +190,7 @@ def fetch_index_valuation(fund_code: str) -> dict[str, Any] | None:
     if info.get("csi"):
         try:
             df = ak.stock_zh_index_hist_csindex(
-                symbol=info["csi"], start_date="20190101", end_date="20300101"
+                symbol=info["csi"], start_date="20190101", end_date=f"{datetime.now().year+5}0101"
             )
             if df is not None and not df.empty and "滚动市盈率" in df.columns:
                 df = df.dropna(subset=["滚动市盈率"])

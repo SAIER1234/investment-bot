@@ -1,12 +1,14 @@
 """
 LLM 客户端工厂
 统一管理 DeepSeek API 连接参数，analyze.py 和 digest_ai.py 共用。
+内置 retry（3次，间隔2/4/8秒）+ timeout（120秒）。
 """
 
 import logging
 import os
+import time
 
-from openai import OpenAI
+from openai import OpenAI, APITimeoutError, APIError, APIConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,9 @@ DEFAULT_INVEST_TEMP = 0.7     # 投资报告
 DEFAULT_INVEST_TOKENS = 4096
 DEFAULT_DIGEST_TEMP = 0.8     # 晨报摘要
 DEFAULT_DIGEST_TOKENS = 2048
+
+RETRIES = 3                   # 最多重试次数
+RETRY_BASE_DELAY = 2          # 首次重试延迟（秒），指数递增：2, 4, 8
 
 
 def create_deepseek_client(api_key: str | None = None) -> OpenAI:
@@ -34,15 +39,31 @@ def call_deepseek(
     temperature: float = DEFAULT_INVEST_TEMP,
     max_tokens: int = DEFAULT_INVEST_TOKENS,
 ) -> str:
-    """调用 DeepSeek Chat API，返回文本响应"""
-    client = create_deepseek_client(api_key)
-    response = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return response.choices[0].message.content or ""
+    """调用 DeepSeek Chat API，内置 retry + timeout。返回文本响应。"""
+    last_error = None
+
+    for attempt in range(RETRIES):
+        try:
+            client = create_deepseek_client(api_key)
+            response = client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=120,
+            )
+            return response.choices[0].message.content or ""
+        except (APITimeoutError, APIConnectionError) as e:
+            last_error = e
+            if attempt < RETRIES - 1:
+                delay = RETRY_BASE_DELAY ** (attempt + 1)  # 2, 4, 8
+                logger.warning(f"DeepSeek API 第{attempt+1}/{RETRIES}次失败，{delay}s后重试: {e}")
+                time.sleep(delay)
+        except APIError as e:
+            # 非网络错误（401/429/500等），不重试，直接抛
+            raise RuntimeError(f"DeepSeek API 错误: {e}") from e
+
+    raise RuntimeError(f"DeepSeek API {RETRIES}次重试全部失败: {last_error}")

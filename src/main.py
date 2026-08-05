@@ -48,6 +48,15 @@ def main() -> int:
             push_error_notification(f"数据抓取失败: {e}", "investment-bot", token)
         return 1
 
+    # ── Step 1.5: 沪深300 PE（一次抓取，analyze和global_rotation共用） ──
+    try:
+        from src.analyze import _get_season as get_a_season
+        data["csi_season"] = get_a_season()
+        logger.info(f"沪深300 PE: {data['csi_season']['pe']} 分位={data['csi_season']['pe_pct']}%")
+    except Exception as e:
+        logger.warning(f"沪深300 PE抓取失败（非致命）: {e}")
+        data["csi_season"] = {'season': '?', 'pe': None, 'pe_pct': None, 'guidance': '?', 'date': None}
+
     # ── Step 2: 全网基金扫描（仅周五或超过7天） ──
     logger.info("Step 2/4: 检查是否需要全网基金扫描...")
     scanner_data = None
@@ -106,11 +115,8 @@ def main() -> int:
     logger.info("Step 2.6/4: 全球轮动数据...")
     global_rotation = None
     try:
-        # 从已有数据提取沪深300 PE和中国10Y国债（避免重复请求）
-        from src.analyze import _get_season as get_a_season
-        season_data = get_a_season()
-        csi_pe = season_data.get("pe")
-        # 中国10Y从已缓存的global_indicators取
+        csi_season = data.get("csi_season", {})
+        csi_pe = csi_season.get("pe")
         cn_10y = None
         global_ind = data.get("global_indicators", {})
         yield_spread = global_ind.get("yield_spread", {})

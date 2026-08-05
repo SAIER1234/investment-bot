@@ -94,7 +94,7 @@ def take_snapshot() -> dict[str, dict[str, Any]]:
 def fetch_index_valuation_direct(index_code: str) -> dict[str, Any] | None:
     """用CSI指数代码直接获取PE和分位"""
     try:
-        df = ak.stock_zh_index_hist_csindex(symbol=index_code, start_date="20050101", end_date="20300101")
+        df = ak.stock_zh_index_hist_csindex(symbol=index_code, start_date="20050101", end_date=f"{date.today().year+5}0101")
         pe_col = "滚动市盈率"
         df_c = df.dropna(subset=[pe_col])
         if df_c.empty:
@@ -133,7 +133,9 @@ def verify() -> dict[str, Any]:
     history = load_json(path)
     dates = sorted(history.keys())
 
-    # 找90天前最接近的快照
+    # 找最早可用快照（最少2天即可开始验证，首选~90天前）
+    if len(dates) < 2:
+        return {"error": "快照不足，需至少2天数据"}
     target = (today - timedelta(days=90)).isoformat()
     past_date = dates[0]
     for d in dates:
@@ -141,6 +143,7 @@ def verify() -> dict[str, Any]:
             past_date = d
         else:
             break
+    days_available = (today - date.fromisoformat(past_date)).days
 
     if today.isoformat() not in history:
         take_snapshot()
@@ -211,6 +214,8 @@ def verify() -> dict[str, Any]:
     return {
         "date": today.isoformat(),
         "past_date": past_date,
+        "days_available": days_available,
+        "warmup": days_available < 30,
         "has_alert": alert_triggered,
         "results": results,
     }
@@ -223,8 +228,11 @@ def format_verification(results: dict[str, Any]) -> str:
 
     lines = [
         "## 月度逻辑验证\n",
-        f"对比日期: {results.get('past_date','?')} → {results.get('date','?')}\n"
+        f"对比日期: {results.get('past_date','?')} → {results.get('date','?')}"
     ]
+    if results.get("warmup"):
+        lines.append(f" (预热中，仅{results.get('days_available','?')}天数据，参考有限)")
+    lines.append("\n")
 
     data = results.get("results", {})
     for code, r in data.items():
