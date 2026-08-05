@@ -22,6 +22,7 @@ from src.fund_scanner import scan_if_needed
 from src.industry_monitor import monthly_scan, format_industry_prompt
 from src.logic_verifier import take_snapshot, verify, format_verification
 from src.global_rotation import fetch_global_rotation_data
+from src.fundamental_check import check_all_holdings, format_fundamental_prompt
 from datetime import date
 
 
@@ -78,7 +79,7 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"逻辑验证失败（非致命）: {e}")
 
-    # 月度行业扫描（仅每月第一天）
+    # 月度行业扫描 + 基本面验证（仅每月第一天）
     if date.today().day == 1:
         logger.info("月度行业信号扫描...")
         try:
@@ -87,6 +88,19 @@ def main() -> int:
             logger.info("月度行业扫描完成")
         except Exception as e:
             logger.warning(f"月度行业扫描失败（非致命）: {e}")
+
+        logger.info("月度基本面验证（成分股财报）...")
+        try:
+            fundamental = check_all_holdings()
+            fundamental_prompt = format_fundamental_prompt(fundamental)
+            # 追加到 logic_check 后面
+            if logic_check:
+                logic_check = logic_check + "\n" + fundamental_prompt
+            else:
+                logic_check = fundamental_prompt
+            logger.info(f"基本面验证完成: {fundamental.get('verdicts', [])}")
+        except Exception as e:
+            logger.warning(f"基本面验证失败（非致命）: {e}")
 
     # ── Step 2.6: 全球轮动数据（每周五刷新） ──
     logger.info("Step 2.6/4: 全球轮动数据...")
