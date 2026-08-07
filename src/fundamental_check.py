@@ -28,8 +28,9 @@ COL_PROFIT_YOY = 2   # 净利润同比增长率
 COL_REVENUE = 5      # 营业收入
 COL_REVENUE_YOY = 6  # 营业收入同比增长率
 
-# 取指数前N大权重股
-TOP_N_STOCKS = 8
+# 取成分股数量：50只全取保证龙头股被包含
+# index_stock_cons_csindex 按代码排序非权重排序，只取前N会漏掉宁德时代等大票
+TOP_N_STOCKS = 50
 
 
 def _get_verifiable_holdings() -> list[dict[str, Any]]:
