@@ -205,6 +205,35 @@ def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any
     med_profit = result["median_profit_yoy"]
     med_rev = result["median_revenue_yoy"]
 
+    # ── 数据质量检查 ──
+    # 1. 样本数不足 → 降级为不可靠
+    if checked < 30:
+        logger.warning(f"{fund_name}: 仅有{checked}只有效数据，样本不足（需>=30）")
+        result["detail"] = f"有效样本仅{checked}/{result['total_stocks']}，数据可能不可靠"
+        # 仍然给结论但标注
+    # 2. 记录龙头股数据用于调试
+    for sd in stock_details:
+        if sd["code"] in ("300750", "300014"):  # 宁德时代, 亿纬锂能
+            logger.info(f"  {sd['name']}({sd['code']}): 利润YoY={sd['profit_yoy']}, 营收YoY={sd['revenue_yoy']}")
+    # 3. 对比上次缓存，变化超过30个百分点则警告
+    if checked >= 30 and profit_yoys:
+        from src.common import DATA_DIR
+        cache_path = os.path.join(DATA_DIR, "fundamental_check_cache.json")
+        if os.path.exists(cache_path):
+            try:
+                cache = load_json(cache_path)
+                for v in cache.get("verdicts", []):
+                    if fund_code in str(v):
+                        import re
+                        old_match = re.search(r'[-+]?\d+\.?\d*%', v)
+                        if old_match:
+                            old_median = float(old_match.group().rstrip('%'))
+                            new_median = float(med_profit) if med_profit else 0
+                            if abs(new_median - old_median) > 30:
+                                logger.warning(f"{fund_name}: 利润中位数大幅变化 {old_median:+.1f}% → {new_median:+.1f}%，请核实")
+            except Exception:
+                pass
+
     # 三问法自动判断
     # Q1: 利润在涨吗？ → 中位数>0 且 过半公司利润正增长
     profit_ok = med_profit is not None and med_profit > 0 and profit_ratio >= 50
