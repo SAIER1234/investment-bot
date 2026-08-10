@@ -119,6 +119,19 @@ def fetch_stock_financials(stock_code: str) -> dict[str, Any] | None:
         return None
 
 
+def _get_index_data_years(index_code: str) -> float | None:
+    """获取CSI指数PE数据的年份数。返回None表示无法获取。"""
+    try:
+        df = ak.stock_zh_index_hist_csindex(symbol=index_code,
+                                            start_date='20050101', end_date='20300101')
+        df = df.dropna(subset=['滚动市盈率'])
+        if len(df) > 0:
+            return (df.iloc[-1]['日期'] - df.iloc[0]['日期']).days / 365.25
+    except Exception:
+        pass
+    return None
+
+
 def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any]:
     """
     检查单只基金的基本面。
@@ -137,6 +150,18 @@ def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any
         "verdict": "数据不足",
         "ok": False,
     }
+
+    # 0. 检测指数PE数据年限（新兴指数判断）
+    data_years = _get_index_data_years(index_code)
+    is_emerging = data_years is not None and data_years < 5
+    result["data_years"] = round(data_years, 1) if data_years else None
+    result["is_emerging"] = is_emerging
+    if is_emerging:
+        result["pe_threshold_note"] = (
+            f"PE数据仅{result['data_years']}年，分位不可靠。"
+            f"按新兴指数规则PE<55%+利润≥50%即可，仓位≤20%。"
+        )
+        logger.info(f"  {fund_name}: 新兴指数(PE数据{result['data_years']}年)，放宽至55%门槛")
 
     # 1. 获取成分股
     constituents = fetch_index_constituents(index_code)
@@ -313,10 +338,13 @@ def format_fundamental_prompt(check_result: dict[str, Any]) -> str:
     lines = ["## 月度基本面验证（代码自动检查）\n"]
 
     for r in check_result.get("results", []):
-        lines.append(f"**{r['fund_name']}** `{r['fund_code']}` [CSI {r['index_code']}]")
+        emerging_tag = " [新兴]" if r.get("is_emerging") else ""
+        lines.append(f"**{r['fund_name']}** `{r['fund_code']}` [CSI {r['index_code']}]{emerging_tag}")
         lines.append(f"> 结论: {r['verdict']}")
         if r.get("detail"):
             lines.append(f"> {r['detail']}")
+        if r.get("pe_threshold_note"):
+            lines.append(f"> ⚠️ {r['pe_threshold_note']}")
         lines.append("")
 
     # 整体判断
