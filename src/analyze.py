@@ -101,7 +101,8 @@ def _nav_stale_warning(fund_date: str, today: str) -> str:
 def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | None = None,
                         industry_signals: str | None = None,
                         logic_check: str | None = None,
-                        global_rotation: dict[str, Any] | None = None) -> str:
+                        global_rotation: dict[str, Any] | None = None,
+                        spring_scan: dict[str, Any] | None = None) -> str:
     """
     将数据组装为结构化 prompt：
     估值仪表盘 → 持仓数据 → 市场情绪 → 基金雷达（如有）→ 要求AI按固定框架输出。
@@ -139,10 +140,6 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
         lines.append(f"**北向资金:** {net:+.2f}亿元 (日期:{northbound.get('date','N/A')})")
     elif northbound and "warning" in northbound:
         lines.append(f"**北向资金:** 数据不可用")
-    if semi_flow:
-        lines.append(f"**半导体板块资金:** 主力净流入{semi_flow.get('main_net_inflow_yi', 0)}亿元 "
-                     f"净占比{semi_flow.get('main_net_ratio', 0) or 0:+.2f}% "
-                     f"涨跌{semi_flow.get('change_pct', 0) or 0:+.2f}%")
 
     # ── 全球宏观 ──
     global_ind = data.get("global_indicators", {})
@@ -178,7 +175,7 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
         tag = "【计划买入，尚未建仓】" if planned else ""
 
         lines.append(f"### {name} `{code}` {tag}")
-        lines.append(f"- 投入金额: {amount}元 | 类型: 场外基金 | 总资金占比: {amount/50800*100:.0f}%")
+        lines.append(f"- 投入金额: {amount}元 | 类型: 场外基金 | 总资金占比: {amount/portfolio.get('total_capital',amount)*100:.0f}%")
 
         # 净值 + 今日盈亏
         nav_data = otc_data.get(code)
@@ -236,6 +233,26 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
         lines.append(industry_signals)
         lines.append("")
 
+    # ── W4信号检测 ──
+    if season_data.get('pe_pct') and season_data['pe_pct'] >= 80:
+        w4_parts = [f"CSI300 PE分位{season_data['pe_pct']}%已入冬"]
+        if turnover and turnover.get('total_turnover_yi'):
+            w4_parts.append(f"成交额{turnover['total_turnover_yi']}亿")
+        if northbound and 'warning' not in northbound:
+            net = northbound.get('net_flow_yi', 0) or 0
+            if net < 0:
+                w4_parts.append(f"北向流出{net:.0f}亿")
+        lines.append(f"**W4检查:** {' | '.join(w4_parts)}")
+        if season_data['pe_pct'] >= 80:
+            lines.append("⚠️ 沪深300入冬。W4触发条件：PE>80%+成交萎缩+北向连出。关注是否全满足。")
+        lines.append("")
+
+    # ── 全市场春扫（每周五） ──
+    if spring_scan:
+        from src.sector_spring_scanner import format_spring_scan_prompt
+        lines.append(format_spring_scan_prompt(spring_scan))
+        lines.append("")
+
     # ── 基金雷达（每周扫描结果） ──
     if scanner_data:
         from src.fund_scanner import format_scanner_prompt, global_temperature_gauge
@@ -264,7 +281,7 @@ def build_report_prompt(data: dict[str, Any], scanner_data: dict[str, Any] | Non
     # ── 输出要求 ──
     lines.append("---")
     lines.append(f"数据时间: {data.get('timestamp', '')[:19]}")
-    lines.append(f"投资者: 学生 | 总资金70800元 | 风格=机会驱动 | 全部场外基金")
+    lines.append(f"投资者: 学生 | 总资金{portfolio.get('total_capital','?')}元 | 风格=机会驱动 | 全部场外基金")
     lines.append("")
     lines.append("**请严格按照系统提示词的格式输出报告。**")
     lines.append("对 planned=true 的标的，重点判断入场时机，给出具体净值区间和金额。")
@@ -277,7 +294,8 @@ def analyze(data: dict[str, Any], api_key: str | None = None,
             scanner_data: dict[str, Any] | None = None,
             industry_signals: str | None = None,
             logic_check: str | None = None,
-            global_rotation: dict[str, Any] | None = None) -> dict[str, str]:
+            global_rotation: dict[str, Any] | None = None,
+            spring_scan: dict[str, Any] | None = None) -> dict[str, str]:
     """
     主入口：组装 prompt → 调 DeepSeek → 返回分析结果。
     返回 {"report": "...", "error": "..."} 二选一。
@@ -290,7 +308,7 @@ def analyze(data: dict[str, Any], api_key: str | None = None,
 
     try:
         system_prompt = load_system_prompt()
-        user_prompt = build_report_prompt(data, scanner_data, industry_signals, logic_check, global_rotation)
+        user_prompt = build_report_prompt(data, scanner_data, industry_signals, logic_check, global_rotation, spring_scan)
 
         logger.info("调用 DeepSeek API 生成投资建议...")
         report = call_deepseek(

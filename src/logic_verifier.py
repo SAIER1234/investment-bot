@@ -201,8 +201,8 @@ def verify() -> dict[str, Any]:
                 alert_triggered = True
                 results[code] = {
                     "verdict": "🟡 W1触发",
-                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}→{cur_pe_pct}%），利润约{profit_change or '?'}",
-                    "action": "减半仓。PE跑赢利润，价格已超过价值。",
+                    "reason": f"PE分位+{delta_pct}%（{past_pe_pct}→{cur_pe_pct}%），利润数据不足无法判断",
+                    "action": "减半仓。PE在涨但利润数据缺失，价格可能已超过价值。",
                 }
         else:  # delta < -5
             results[code] = {
@@ -236,7 +236,18 @@ def format_verification(results: dict[str, Any]) -> str:
 
     data = results.get("results", {})
     for code, r in data.items():
-        lines.append(f"**{code}** | {r['verdict']}")
+        # 用基金名替代裸代码
+        from src.common import CONFIG_DIR, load_json
+        import os
+        fund_name = code
+        try:
+            pf = load_json(os.path.join(CONFIG_DIR, "portfolio.json"))
+            for h in pf.get("holdings", []):
+                if h["code"] == code:
+                    fund_name = f"{h['name']}({code})"
+                    break
+        except: pass
+        lines.append(f"**{fund_name}** | {r['verdict']}")
         lines.append(f"  {r['reason']}")
         if r['action'] != "继续持有":
             lines.append(f"  → {r['action']}")

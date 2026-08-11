@@ -220,6 +220,16 @@ def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any
         result["verdict"] = "无有效财务数据"
         return result
 
+    # A2信号: 新兴指数+PE<55%+利润>100%
+    if is_emerging and med_profit is not None and med_rev is not None:
+        result["a2_check"] = {
+            "emerging": True,
+            "profit_gt_100": med_profit > 100,
+        }
+        if med_profit > 100:
+            result["a2_note"] = f"🔥 A2候选：新兴指数+利润中位{med_profit:+.0f}%>100%"
+            logger.info(f"  {fund_name}: A2候选!")
+
     if profit_yoys:
         result["median_profit_yoy"] = round(float(pd.Series(profit_yoys).median()), 1)
     if revenue_yoys:

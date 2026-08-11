@@ -19,6 +19,7 @@ from src.fetch_data import fetch_all, save_cache
 from src.analyze import analyze
 from src.push_wechat import push_investment_report, push_error_notification
 from src.fund_scanner import scan_if_needed
+from src.sector_spring_scanner import scan_if_needed as spring_scan
 from src.industry_monitor import monthly_scan, format_industry_prompt
 from src.logic_verifier import take_snapshot, verify, format_verification
 from src.global_rotation import fetch_global_rotation_data
@@ -68,6 +69,16 @@ def main() -> int:
             logger.info("今日无需扫描（复用缓存）")
     except Exception as e:
         logger.warning(f"基金扫描失败（非致命）: {e}")
+
+    # ── Step 2.1: 全市场春扫（每周五） ──
+    logger.info("Step 2.1/4: 全市场春扫...")
+    spring_scan_data = None
+    try:
+        spring_scan_data = spring_scan()
+        if spring_scan_data:
+            logger.info(f"春扫完成: {spring_scan_data.get('spring_count',0)}个春行业")
+    except Exception as e:
+        logger.warning(f"春扫失败（非致命）: {e}")
 
     # ── Step 2.5: 逻辑验证 + 月度行业扫描 ──
     logic_check = None
@@ -162,7 +173,8 @@ def main() -> int:
         yield_spread = global_ind.get("yield_spread", {})
         if yield_spread:
             cn_10y = yield_spread.get("cn_10y")
-        global_rotation = fetch_global_rotation_data(csi_pe=csi_pe, cn_10y=cn_10y)
+        a_pct_val = csi_season.get("pe_pct")
+        global_rotation = fetch_global_rotation_data(csi_pe=csi_pe, cn_10y=cn_10y, a_pct=a_pct_val)
         logger.info("全球轮动数据获取完成")
     except Exception as e:
         logger.warning(f"全球轮动数据获取失败（非致命）: {e}")
@@ -170,7 +182,8 @@ def main() -> int:
     # ── Step 3: AI 分析 ──
     logger.info("Step 3/4: DeepSeek 生成投资建议...")
     result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
-                     logic_check=logic_check, global_rotation=global_rotation)
+                     logic_check=logic_check, global_rotation=global_rotation,
+                     spring_scan=spring_scan_data)
     if "error" in result:
         logger.error(f"AI 分析失败: {result['error']}")
         if token:

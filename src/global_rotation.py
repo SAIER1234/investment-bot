@@ -212,6 +212,7 @@ def is_friday() -> bool:
 
 def fetch_global_rotation_data(csi_pe: float | None = None,
                                 cn_10y: float | None = None,
+                                a_pct: float | None = None,
                                 force: bool = False) -> dict[str, Any]:
     """
     主入口：获取全球轮动数据。
@@ -257,8 +258,7 @@ def fetch_global_rotation_data(csi_pe: float | None = None,
     # FED模型
     fed = fetch_fed_model(csi_pe, cn_10y)
 
-    # 季节
-    a_pct = None  # 由调用方传入或从season计算
+    # 季节 (a_pct由调用方main.py传入)
     spy_pct = spy_data.get("price_pct")  # 价格分位 ≈ PE分位
     qqq_pct = qqq_data.get("price_pct")
 
