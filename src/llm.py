@@ -60,8 +60,14 @@ def call_deepseek(
             content = msg.content or ''
             if content:
                 return content
-            logger.warning(f"第{attempt+1}次调用返回空content，重试")
-            last_error = RuntimeError("DeepSeek返回空content")
+            # 诊断空content原因
+            finish = getattr(response.choices[0], 'finish_reason', 'unknown')
+            usage = getattr(response, 'usage', None)
+            tok_info = f"prompt={usage.prompt_tokens}/completion={usage.completion_tokens}" if usage else 'no-usage'
+            logger.warning(
+                f"第{attempt+1}次调用返回空content。finish_reason={finish}, {tok_info}"
+            )
+            last_error = RuntimeError(f"DeepSeek返回空content (finish_reason={finish})")
         except (APITimeoutError, APIConnectionError) as e:
             last_error = e
             if attempt < RETRIES - 1:
