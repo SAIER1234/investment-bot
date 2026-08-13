@@ -101,20 +101,30 @@ def _find_otc_funds(keyword: str, limit: int = 3) -> list[dict[str, str]]:
         return []
 
 
-def _quick_profit_check(index_code: str, limit: int = 6) -> dict[str, Any] | None:
+def _quick_profit_check(index_code: str, limit: int = 12) -> dict[str, Any] | None:
     """
-    快速利润验证：取指数前limit只成分股，算利润增速中位数。
-    比fundamental_check.check_fund()轻量（后者查50只）。
-    返回 {median_profit_yoy, positive_ratio, checked}
+    快速利润验证：均匀采样成分股，算利润增速中位数。
+    采样策略：从整个代码区间均匀取limit只（覆盖小盘/中盘/大盘），
+    避免只取前N只小盘股的偏差（电池bug的教训）。
     """
     try:
         cons = ak.index_stock_cons_csindex(symbol=index_code)
         if cons is None or cons.empty:
             return None
 
+        # 均匀采样：整个列表每隔 step 取一只
+        n_total = len(cons)
+        sample_size = min(limit, n_total)
+        if n_total <= sample_size:
+            sampled = cons
+        else:
+            step = n_total / sample_size
+            indices = [int(i * step) for i in range(sample_size)]
+            sampled = cons.iloc[indices]
+
         yoys = []
         checked = 0
-        for _, row in cons.head(limit).iterrows():
+        for _, row in sampled.iterrows():
             stock_code = str(row.iloc[4])
             try:
                 fin = ak.stock_financial_abstract_ths(symbol=stock_code, indicator='按报告期')
