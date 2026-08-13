@@ -46,10 +46,20 @@ def _get_pe_percentile(code: str) -> dict[str, Any] | None:
         cur_pe = round(float(latest['滚动市盈率']), 1)
         cur_pct = round((pe_s < cur_pe).sum() / len(pe_s) * 100, 1)
         season = '春' if cur_pct < 30 else ('夏' if cur_pct < 60 else ('秋' if cur_pct < 80 else '冬'))
+
+        # 第三问: PE正常化空间（纯数学，基于已下载数据，零额外成本）
+        # PE回到历史中位(50%分位)的潜在涨幅
+        import numpy as np
+        median_pe = round(float(np.median(pe_s)), 1)
+        norm_upside = round((median_pe / cur_pe - 1) * 100, 1) if cur_pe > 0 else None
+
         return {
             'pe': cur_pe, 'pe_pct': cur_pct, 'season': season,
             'date': str(latest['日期'])[:10],
             'years': (df.iloc[-1]['日期'] - df.iloc[0]['日期']).days / 365.25,
+            # 第三问数据
+            'median_pe': median_pe,
+            'pe_norm_upside': norm_upside,  # PE回到正常(中位)的涨幅，不含利润增长
         }
     except Exception as e:
         logger.warning(f"CSI {code} PE获取失败: {e}")
@@ -240,7 +250,7 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
         for s in spring:
             emerging = "[新兴]" if s.get('years', 99) < 5 else ""
             lines.append(f"- **{s['name']}**{emerging}: PE={s['pe']} PE分位={s['pe_pct']}% ({s['season']})")
-            # 利润数据
+            # 利润数据（第一问）
             profit = s.get('profit')
             if profit:
                 med = profit['median_profit_yoy']
@@ -248,6 +258,9 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
                 lines.append(f"  - 利润中位数{med:+.1f}% | {pos:.0f}%公司正增长 | 已查{profit['checked']}只")
             else:
                 lines.append(f"  - 利润数据: 暂无（API未返回）")
+            # PE正常化空间（第三问）
+            if s.get('median_pe') and s.get('pe_norm_upside') is not None:
+                lines.append(f"  - 第三问: PE回到历史中位({s['median_pe']})→潜在+{s['pe_norm_upside']}%（不含利润增长）")
             # 信号级别
             sig = s.get('signal')
             if sig == 'S1':
