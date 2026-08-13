@@ -56,6 +56,51 @@ def _get_pe_percentile(code: str) -> dict[str, Any] | None:
         return None
 
 
+# 行业名 → 场外基金搜索关键词（用于S/A级触发时附具体基金）
+SECTOR_FUND_KEYWORDS = {
+    '中证有色': '有色',
+    '中证煤炭': '煤炭',
+    '中证钢铁': '钢铁',
+    '中证医药': '医药',
+    'CS医药': '医药',
+    '中证中药': '中药',
+    '中证消费': '消费',
+    'CS消费': '消费',
+    '中证军工': '军工',
+    'CS人工智': '人工智能',
+    '人工智能': '人工智能',
+    '5G通信': '5G',
+    '光伏产业': '光伏',
+    'CS新能车': '新能源车',
+    'CS电池': '电池',
+    'CS港股通互联网': '港股通互联网',
+    '中证传媒': '传媒',
+}
+
+
+def _find_otc_funds(keyword: str, limit: int = 3) -> list[dict[str, str]]:
+    """按关键词搜索场外基金（用户支付宝可买），返回前limit只A类基金"""
+    try:
+        df = ak.fund_name_em()
+        if df is None or df.empty:
+            return []
+        match = df[df['基金简称'].str.contains(keyword, na=False)]
+        funds = []
+        for _, r in match.iterrows():
+            name = str(r.get('基金简称', ''))
+            code = str(r.get('基金代码', ''))
+            ftype = str(r.get('基金类型', ''))
+            # 只保留场外可申购的指数型/股票型，优先A类
+            if 'A' in name and ('指数' in ftype or '股票' in ftype):
+                funds.append({'name': name, 'code': code, 'type': ftype})
+                if len(funds) >= limit:
+                    break
+        return funds
+    except Exception as e:
+        logger.warning(f"基金搜索[{keyword}]失败: {e}")
+        return []
+
+
 def _quick_profit_check(index_code: str, limit: int = 6) -> dict[str, Any] | None:
     """
     快速利润验证：取指数前limit只成分股，算利润增速中位数。
@@ -142,6 +187,14 @@ def scan_all_sectors(verify_profit: bool = True) -> dict[str, Any]:
                 else:
                     entry['signal'] = 'WEAK'
 
+                # S1/A1触发 → 附具体场外基金
+                if entry['signal'] in ('S1', 'A1'):
+                    kw = SECTOR_FUND_KEYWORDS.get(name, name)
+                    funds = _find_otc_funds(kw)
+                    if funds:
+                        entry['funds'] = funds
+                        logger.info(f"  {name} {entry['signal']}: 找到{len(funds)}只场外基金")
+
         if pct < 30:
             spring_candidates.append(entry)
         elif pct < 40:
@@ -191,6 +244,11 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
                 lines.append(f"  - 🔥 **S1信号: PE<30%+利润>50%+过半正增长 → 三问法第一问通过**")
             elif sig == 'A1':
                 lines.append(f"  - ⚠️ **A1信号: PE<40%+利润>30%+过半正增长 → 三问法第一问通过**")
+            # 具体基金
+            funds = s.get('funds')
+            if funds:
+                fund_str = ' | '.join(f"{f['name']}({f['code']})" for f in funds)
+                lines.append(f"  - 场外基金: {fund_str}")
             elif sig == 'NO':
                 lines.append(f"  - ❌ 利润中位为负，三问法第一问不通过。便宜≠好机会")
             elif sig == 'WEAK':
@@ -212,6 +270,10 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
                     lines.append(f"  - ⚠️ **A1信号触发**")
                 elif sig == 'NO':
                     lines.append(f"  - ❌ 利润为负，不通过")
+            funds = s.get('funds')
+            if funds:
+                fund_str = ' | '.join(f"{f['name']}({f['code']})" for f in funds)
+                lines.append(f"  - 场外基金: {fund_str}")
 
     # 极端分位
     extreme = scan_result.get('extreme', [])
