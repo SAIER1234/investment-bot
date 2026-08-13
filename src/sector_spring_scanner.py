@@ -56,7 +56,52 @@ def _get_pe_percentile(code: str) -> dict[str, Any] | None:
         return None
 
 
-def scan_all_sectors() -> dict[str, Any]:
+def _quick_profit_check(index_code: str, limit: int = 6) -> dict[str, Any] | None:
+    """
+    快速利润验证：取指数前limit只成分股，算利润增速中位数。
+    比fundamental_check.check_fund()轻量（后者查50只）。
+    返回 {median_profit_yoy, positive_ratio, checked}
+    """
+    try:
+        cons = ak.index_stock_cons_csindex(symbol=index_code)
+        if cons is None or cons.empty:
+            return None
+
+        yoys = []
+        checked = 0
+        for _, row in cons.head(limit).iterrows():
+            stock_code = str(row.iloc[4])
+            try:
+                fin = ak.stock_financial_abstract_ths(symbol=stock_code, indicator='按报告期')
+                if fin is None or fin.empty or len(fin) < 2:
+                    continue
+                latest = fin.iloc[-1]
+                py = str(latest.iloc[2])
+                if 'False' in py or py == '--' or py == '':
+                    continue
+                val = float(py.replace('%', ''))
+                yoys.append(val)
+                checked += 1
+            except Exception:
+                continue
+
+        if not yoys:
+            return None
+
+        import numpy as np
+        med = round(float(np.median(yoys)), 1)
+        pos = sum(1 for v in yoys if v > 0)
+        return {
+            'median_profit_yoy': med,
+            'positive_ratio': round(pos / len(yoys) * 100, 0),
+            'checked': checked,
+        }
+    except Exception as e:
+        logger.warning(f"{index_code} 快速利润验证失败: {e}")
+        return None
+
+
+def scan_all_sectors(verify_profit: bool = True) -> dict[str, Any]:
     """主入口：扫描所有行业，标记春/夏/秋/冬，识别S/A级候选"""
     results = []
     spring_candidates = []   # PE<30%
@@ -79,6 +124,23 @@ def scan_all_sectors() -> dict[str, Any]:
         elif pct > 95:
             entry['extreme'] = 'overvalued'
             extreme_candidates.append(entry)
+
+        # 春天候选 → 快速利润验证
+        if verify_profit and pct < 40:
+            profit = _quick_profit_check(code)
+            if profit:
+                entry['profit'] = profit
+                med = profit['median_profit_yoy']
+                pos_ratio = profit['positive_ratio']
+                # 三问法第一问
+                if med > 50 and pos_ratio >= 50:
+                    entry['signal'] = 'S1'
+                elif med > 30 and pos_ratio >= 50:
+                    entry['signal'] = 'A1'
+                elif med <= 0:
+                    entry['signal'] = 'NO'
+                else:
+                    entry['signal'] = 'WEAK'
 
         if pct < 30:
             spring_candidates.append(entry)
@@ -115,6 +177,24 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
         for s in spring:
             emerging = "[新兴]" if s.get('years', 99) < 5 else ""
             lines.append(f"- **{s['name']}**{emerging}: PE={s['pe']} PE分位={s['pe_pct']}% ({s['season']})")
+            # 利润数据
+            profit = s.get('profit')
+            if profit:
+                med = profit['median_profit_yoy']
+                pos = profit['positive_ratio']
+                lines.append(f"  - 利润中位数{med:+.1f}% | {pos:.0f}%公司正增长 | 已查{profit['checked']}只")
+            else:
+                lines.append(f"  - 利润数据: 暂无（API未返回）")
+            # 信号级别
+            sig = s.get('signal')
+            if sig == 'S1':
+                lines.append(f"  - 🔥 **S1信号: PE<30%+利润>50%+过半正增长 → 三问法第一问通过**")
+            elif sig == 'A1':
+                lines.append(f"  - ⚠️ **A1信号: PE<40%+利润>30%+过半正增长 → 三问法第一问通过**")
+            elif sig == 'NO':
+                lines.append(f"  - ❌ 利润中位为负，三问法第一问不通过。便宜≠好机会")
+            elif sig == 'WEAK':
+                lines.append(f"  - 🟡 利润为正但不够猛（<30%），未达A1门槛。持续观察")
             if s.get('years', 99) < 5:
                 lines.append(f"  - PE数据仅{s['years']:.1f}年，分位仅供参考。新兴规则PE<55%即可。")
 
@@ -124,6 +204,14 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
         lines.append("\n### 🌱 A级候选（PE<40%）\n")
         for s in a_level[:5]:
             lines.append(f"- **{s['name']}**: PE={s['pe']} PE分位={s['pe_pct']}%")
+            profit = s.get('profit')
+            if profit:
+                lines.append(f"  - 利润中位数{profit['median_profit_yoy']:+.1f}% | {profit['positive_ratio']:.0f}%正增长")
+                sig = s.get('signal')
+                if sig == 'A1':
+                    lines.append(f"  - ⚠️ **A1信号触发**")
+                elif sig == 'NO':
+                    lines.append(f"  - ❌ 利润为负，不通过")
 
     # 极端分位
     extreme = scan_result.get('extreme', [])
