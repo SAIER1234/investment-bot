@@ -254,15 +254,17 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
                 lines.append(f"  - 🔥 **S1信号: PE<30%+利润>50%+过半正增长 → 三问法第一问通过**")
             elif sig == 'A1':
                 lines.append(f"  - ⚠️ **A1信号: PE<40%+利润>30%+过半正增长 → 三问法第一问通过**")
+            elif sig == 'NO':
+                lines.append(f"  - ❌ 利润中位为负，三问法第一问不通过。便宜≠好机会")
+            elif sig == 'WEAK':
+                lines.append(f"  - 🟡 利润为正但不够猛（<30%），未达A1门槛。持续观察")
             # 具体基金
             funds = s.get('funds')
             if funds:
                 fund_str = ' | '.join(f"{f['name']}({f['code']})" for f in funds)
                 lines.append(f"  - 场外基金: {fund_str}")
-            elif sig == 'NO':
-                lines.append(f"  - ❌ 利润中位为负，三问法第一问不通过。便宜≠好机会")
-            elif sig == 'WEAK':
-                lines.append(f"  - 🟡 利润为正但不够猛（<30%），未达A1门槛。持续观察")
+            if sig in ('S1', 'A1'):
+                lines.append(f"  - 🟡 12只均匀采样快筛。确认购买前建议全量精查（50只验证）")
             if s.get('years', 99) < 5:
                 lines.append(f"  - PE数据仅{s['years']:.1f}年，分位仅供参考。新兴规则PE<55%即可。")
 
@@ -298,6 +300,19 @@ def format_spring_scan_prompt(scan_result: dict[str, Any]) -> str:
     lines.append("PE数据<5年的新兴行业→自动放宽至PE<55%门槛。")
 
     return "\n".join(lines)
+
+
+def deep_verify_sector(code: str, name: str | None = None) -> dict[str, Any]:
+    """
+    按需精查：对单个行业做全量50只成分股三问法验证。
+    在用户确认购买前手动运行（日常报告不自动跑，避免超时）。
+    返回 {verdict, detail, ok, profit_median, ...}
+    """
+    from src.fundamental_check import check_fund
+    display_name = name or CSI_SECTORS.get(code, code)
+    logger.info(f"精查: {display_name} ({code})")
+    deep = check_fund(fund_code='', fund_name=display_name, index_code=code)
+    return deep
 
 
 def scan_if_needed(force: bool = False) -> dict[str, Any] | None:
