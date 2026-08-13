@@ -53,9 +53,15 @@ def call_deepseek(
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=120,
+                timeout=240,
             )
-            return response.choices[0].message.content or ""
+            msg = response.choices[0].message
+            # v4模型可能返回reasoning_content而content为空
+            content = msg.content or getattr(msg, 'reasoning_content', None) or ''
+            if content:
+                return content
+            logger.warning(f"第{attempt+1}次调用返回空内容，重试")
+            last_error = RuntimeError("DeepSeek返回空content")
         except (APITimeoutError, APIConnectionError) as e:
             last_error = e
             if attempt < RETRIES - 1:
