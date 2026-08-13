@@ -17,7 +17,7 @@ DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 # 默认超参（各模块可覆盖）
 DEFAULT_INVEST_TEMP = 0.7     # 投资报告
-DEFAULT_INVEST_TOKENS = 4096
+DEFAULT_INVEST_TOKENS = 8192  # 推理模型思考占token，输出预算要留足
 DEFAULT_DIGEST_TEMP = 0.8     # 晨报摘要
 DEFAULT_DIGEST_TOKENS = 2048
 
@@ -56,11 +56,11 @@ def call_deepseek(
                 timeout=240,
             )
             msg = response.choices[0].message
-            # v4模型可能返回reasoning_content而content为空
-            content = msg.content or getattr(msg, 'reasoning_content', None) or ''
+            # 只用正式content。reasoning_content是模型思考过程，绝不推送给用户
+            content = msg.content or ''
             if content:
                 return content
-            logger.warning(f"第{attempt+1}次调用返回空内容，重试")
+            logger.warning(f"第{attempt+1}次调用返回空content，重试")
             last_error = RuntimeError("DeepSeek返回空content")
         except (APITimeoutError, APIConnectionError) as e:
             last_error = e
