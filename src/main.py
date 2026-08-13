@@ -193,6 +193,26 @@ def main() -> int:
     report = result["report"]
     logger.info(f"AI 报告生成完成 ({len(report)} 字符)")
 
+    # ── 空报告防护：DeepSeek偶发返回空内容，重试一次 ──
+    if not report or len(report.strip()) < 50:
+        logger.warning("报告为空或过短，重试一次...")
+        result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
+                         logic_check=logic_check, global_rotation=global_rotation,
+                         spring_scan=spring_scan_data)
+        if "error" in result:
+            logger.error(f"重试后AI分析失败: {result['error']}")
+            if token:
+                push_error_notification(f"AI分析失败(重试后): {result['error']}", "investment-bot", token)
+            return 1
+        report = result["report"]
+        logger.info(f"重试后报告 ({len(report)} 字符)")
+
+    if not report or len(report.strip()) < 50:
+        logger.error("重试后报告仍为空，跳过推送")
+        if token:
+            push_error_notification("DeepSeek连续两次返回空报告，今日跳过。请检查API。", "investment-bot", token)
+        return 1
+
     # ── Step 4: 推送到微信 ──
     logger.info("Step 4/4: 推送到微信...")
     push_result = push_investment_report(report)
