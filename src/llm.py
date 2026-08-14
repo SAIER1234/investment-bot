@@ -17,7 +17,7 @@ DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 # 默认超参（各模块可覆盖）
 DEFAULT_INVEST_TEMP = 0.7     # 投资报告
-DEFAULT_INVEST_TOKENS = 8192  # 推理模型思考占token，输出预算要留足
+DEFAULT_INVEST_TOKENS = 16384 # 推理模型思考占token，输出预算要留足
 DEFAULT_DIGEST_TEMP = 0.8     # 晨报摘要
 DEFAULT_DIGEST_TOKENS = 2048
 
