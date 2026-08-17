@@ -190,7 +190,7 @@ def check_s3_signal(a_pct: float | None, spy_pct: float | None, qqq_pct: float |
             "a_share_pct": a_pct,
             "sp500_pct": spy_pct,
             "ndx100_pct": qqq_pct,
-            "action": "机会仓全部清仓，转防御（比较实际利率方向：黄金vs债券vs现金）",
+            "action": "不强制卖已持仓（卖出看W信号）。新买入上限锁死(≤10%)。防御资产备选：比较实际利率方向选黄金或债券/现金",
             "severity": "⚠️ S级",
         }
     return None
