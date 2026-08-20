@@ -1,5 +1,6 @@
 .env
-data/
+data/*
+!data/pe_snapshot.json
 __pycache__/
 *.pyc
 .DS_Store
