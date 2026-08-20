@@ -109,11 +109,25 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"月度行业扫描失败（非致命）: {e}")
 
-    # 基本面验证（每月1日刷新，或缓存超过30天刷新，或首次运行）
+    # 产业链景气跟踪（每天，缓存1天）——第二问的量化证据
+    chain_prompt = ""
+    try:
+        from src.industry_chain import fetch_chain_prices, format_chain_prompt
+        chain = fetch_chain_prices()
+        chain_prompt = format_chain_prompt(chain)
+        logger.info("产业链景气数据获取完成")
+    except Exception as e:
+        logger.warning(f"产业链景气获取失败（非致命）: {e}")
+
+    # 基本面验证（财报披露季每5天一次，其他月份每月1日，或缓存超30天，或首次运行）
+    # 财报披露季: 4月(年报+一季报) 8月(中报) 10月(三季报)。披露季内每天有新财报公布，
+    # 5天检查一次可把"利润变坏→被发现"的滞后从30天压缩到最多5天。
     fundamental_cache = os.path.join(DATA_DIR, "fundamental_check_cache.json")
     fundamental_prompt = ""
     need_fundamental = False
-    if date.today().day == 1:
+    _today = date.today()
+    _is_disclosure_season = _today.month in (4, 8, 10)
+    if _today.day == 1:
         need_fundamental = True
         logger.info("每月1日，刷新基本面验证...")
     elif not os.path.exists(fundamental_cache):
@@ -124,10 +138,13 @@ def main() -> int:
             cache = load_json(fundamental_cache)
             last_check = cache.get("check_date", "")[:10]
             if last_check:
-                days_since = (date.today() - date.fromisoformat(last_check)).days
+                days_since = (_today - date.fromisoformat(last_check)).days
                 if days_since > 30:
                     need_fundamental = True
                     logger.info(f"基本面缓存{days_since}天未刷新，重新验证...")
+                elif _is_disclosure_season and days_since >= 5:
+                    need_fundamental = True
+                    logger.info(f"财报披露季(每5天刷新)，上次{days_since}天前，重新验证...")
                 else:
                     fundamental_prompt = cache.get("prompt", "")
                     logger.info(f"复用基本面缓存 ({days_since}天前, {last_check})")
@@ -161,6 +178,13 @@ def main() -> int:
             logic_check = logic_check + "\n" + fundamental_prompt
         else:
             logic_check = fundamental_prompt
+
+    # 追加产业链景气到逻辑验证
+    if chain_prompt:
+        if logic_check:
+            logic_check = logic_check + "\n" + chain_prompt
+        else:
+            logic_check = chain_prompt
 
     # ── Step 2.6: 全球轮动数据（每周五刷新） ──
     logger.info("Step 2.6/4: 全球轮动数据...")
