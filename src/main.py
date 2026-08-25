@@ -151,10 +151,13 @@ def main() -> int:
         except Exception:
             need_fundamental = True
 
+    # 基本面全✅标志（用于报告误报防护）
+    fundamental_all_ok = False
     if need_fundamental:
         try:
             fundamental = check_all_holdings()
             fundamental_prompt = format_fundamental_prompt(fundamental)
+            fundamental_all_ok = bool(fundamental.get("all_ok"))
             # 缓存结果
             ensure_data_dir()
             save_json(fundamental_cache, {
@@ -171,6 +174,13 @@ def main() -> int:
                     fundamental_prompt = load_json(fundamental_cache).get("prompt", "")
                 except Exception:
                     pass
+    else:
+        # 复用缓存时也要读all_ok
+        try:
+            cache = load_json(fundamental_cache)
+            fundamental_all_ok = all("✅" in str(v) for v in cache.get("verdicts", []))
+        except Exception:
+            pass
 
     # 追加基本面验证到逻辑验证
     if fundamental_prompt:
@@ -236,6 +246,22 @@ def main() -> int:
         if token:
             push_error_notification("DeepSeek连续两次返回空报告，今日跳过。请检查API。", "investment-bot", token)
         return 1
+
+    # ── 误报防护：基本面全✅但报告声称"利润转负" → 疑似DeepSeek幻觉，重试一次 ──
+    BAD_WORDS = ["利润转负", "利润恶化", "W2触发", "利润同比转负"]
+    if fundamental_all_ok and report and any(w in report for w in BAD_WORDS):
+        logger.warning(f"基本面全✅但报告含'利润转负'类文本，疑似幻觉，重试...")
+        result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
+                         logic_check=logic_check, global_rotation=global_rotation,
+                         spring_scan=spring_scan_data)
+        if "error" not in result and result.get("report"):
+            report = result["report"]
+            logger.info(f"误报防护重试后报告 ({len(report)} 字符)")
+            if any(w in report for w in BAD_WORDS):
+                logger.error("重试后仍含'利润转负'类文本，跳过推送")
+                if token:
+                    push_error_notification("报告与基本面数据矛盾(利润数据健康但报告称转负)，今日跳过推送。数据以每月财报验证为准: 全✅。", "investment-bot", token)
+                return 1
 
     # ── Step 4: 推送到微信 ──
     logger.info("Step 4/4: 推送到微信...")
