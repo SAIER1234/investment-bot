@@ -248,8 +248,25 @@ def main() -> int:
         return 1
 
     # ── 误报防护：基本面全✅但报告声称"利润转负" → 疑似DeepSeek幻觉，重试一次 ──
+    # 注意: "利润未转负"/"利润没有转负"/"无需担心利润转负"等正常表述也含"利润转负"子串,
+    # 必须排除被否定词修饰的出现, 否则误杀正常报告(8/25-8/26连续两天因此跳推送)。
+    import re as _re
     BAD_WORDS = ["利润转负", "利润恶化", "W2触发", "利润同比转负"]
-    if fundamental_all_ok and report and any(w in report for w in BAD_WORDS):
+    _NEG_RE = _re.compile(r'(未|没有|不会|并非|无需担心|并没有|不存在|不担心|不用担心|尚未|并没有出现|没有出现)')
+    def _contains_bad_wording(text: str) -> bool:
+        for w in BAD_WORDS:
+            for m in _re.finditer(_re.escape(w), text):
+                # 前面8个字符内出现否定词 → 该处是否定表述, 不算幻觉
+                before = text[max(0, m.start() - 8):m.start()]
+                if _NEG_RE.search(before):
+                    continue
+                # 倒装: "转负并未发生"等
+                after = text[m.end():m.end() + 6]
+                if _re.search(r'^(并未|没有|未|不会|无需担心)', after):
+                    continue
+                return True  # 存在未被否定的"利润转负"类表述
+        return False
+    if fundamental_all_ok and report and _contains_bad_wording(report):
         logger.warning(f"基本面全✅但报告含'利润转负'类文本，疑似幻觉，重试...")
         result = analyze(data, scanner_data=scanner_data, industry_signals=industry_signals,
                          logic_check=logic_check, global_rotation=global_rotation,
