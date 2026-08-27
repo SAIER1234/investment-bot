@@ -184,12 +184,18 @@ def check_fund(fund_code: str, fund_name: str, index_code: str) -> dict[str, Any
 
     result["total_stocks"] = len(top_stocks)
 
-    # 3. 抓财报
+    # 3. 抓财报（带整体时间预算，防止数据源断连时拖垮整个任务）
+    import time as _time
+    _t0 = _time.time()
+    _BUDGET = 300  # 单只基金财报抓取总预算5分钟, 超时则用已抓到样本出结论
     profit_yoys = []
     revenue_yoys = []
     stock_details = []
 
     for code, name in top_stocks:
+        if _time.time() - _t0 > _BUDGET:
+            logger.warning(f"{fund_name}: 财报抓取超过预算({_BUDGET}s)，用已抓取的{result['stocks_checked']}只出结论")
+            break
         fin = fetch_stock_financials(code)
         if fin is None:
             continue
